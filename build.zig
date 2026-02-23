@@ -1,11 +1,16 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
+    const optimize = b.standardOptimizeOption(.{
+        .preferred_optimize_mode = .Debug,
+    });
+    
     const exe = b.addExecutable(.{
         .name = "wijic",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = b.graph.host,
+            .optimize = optimize,
         }),
     });
     

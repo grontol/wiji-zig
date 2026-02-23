@@ -91,15 +91,17 @@ const TokenStream = struct {
             }
         }
         
-        var buffer = [_]u8{0} ** 1024;
-        var str = std.ArrayList(u8).initBuffer(&buffer);
+        // No need to free. Will exit anyway
+        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+        const allocator = gpa.allocator();
+        var str = std.ArrayList(u8).empty;
         
         for (kinds, 0..) |kind, i| {
             if (i > 0) {
-                str.appendSliceAssumeCapacity(" | ");
+                str.appendSlice(allocator, " | ") catch unreachable;
             }
             
-            str.appendSliceAssumeCapacity(@tagName(kind));
+            str.appendSlice(allocator, @tagName(kind)) catch unreachable;
         }
         
         self.reporter.reportErrorAtTokenArgs(peek_token, "Expected `{s}` but got `{s}`", .{
@@ -371,7 +373,7 @@ const Parser = struct {
                 }
             },
             TokenKind.At => std.debug.panic("TODO: Parse intrinsic", .{}),
-            TokenKind.KeywordReturn => std.debug.panic("TODO: Parse return", .{}),
+            TokenKind.KeywordReturn => { expr = self.parseReturn(); },
             
             else => {
                 std.debug.panic("Not Implemented : parsePrimaryExpr {s}", .{@tagName(kind)});
@@ -448,15 +450,20 @@ const Parser = struct {
         
         const close_paren_token = self.ts.nextExpect(.CloseParen);
         
-        var block: ?ast.Block = null;
+        var return_typ: ?ast.Type = null;
+        if (self.ts.peek().kind == .Colon) {
+            _ = self.ts.next();
+            return_typ = self.parseType();
+        }
         
+        var body: ?ast.Block = null;
         if (self.ts.peek().kind == .OpenCurlyBracket) {
-            block = self.parseBlock();
+            body = self.parseBlock();
         }
         
         const start_token = extern_token orelse public_token orelse fn_token;
         
-        const span = if (block) |b| TokenSpan.from_token_and_span(start_token, b.span)
+        const span = if (body) |b| TokenSpan.from_token_and_span(start_token, b.span)
         else TokenSpan.from_tokens(start_token, close_paren_token);
         
         return ast.Expr{
@@ -466,11 +473,27 @@ const Parser = struct {
                     .is_public = public_token != null,
                     .name = name_token,
                     .params = self.collectAndFreeTempList(ast.FnParam, &params),
-                    .return_typ = null,
-                    .block = block,
+                    .return_typ = return_typ,
+                    .body = body,
                 },
             },
             .span = span,
+        };
+    }
+    
+    fn parseReturn(self: *Parser) ast.Expr {
+        const return_token = self.ts.nextExpect(.KeywordReturn);
+        var value: ?*ast.Expr = null;
+        
+        if (!self.ts.peek().has_nl_before) {
+            value = self.makeExprPointer(self.parseExpr());
+        }
+        
+        return .{
+            .span = if (value) |v| TokenSpan.from_token_and_span(return_token, v.span) else TokenSpan.from_token(return_token),
+            .value = .{.returns = .{
+                .value = value,
+            }},
         };
     }
     
@@ -1049,6 +1072,7 @@ const Parser = struct {
 pub fn parse(allocator: std.mem.Allocator, reporter: Reporter, tokens: []const Token) ast.Module {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const temp_allocator = gpa.allocator();
+    defer std.debug.assert(gpa.deinit() == .ok);
     
     var parser = Parser.init(allocator, temp_allocator, reporter, tokens);
     return parser.parseModule();

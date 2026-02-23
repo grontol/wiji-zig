@@ -62,7 +62,7 @@ pub const FnDecl = struct {
     name: Token,
     params: []const FnParam,
     return_typ: ?Type,
-    block: ?Block,
+    body: ?Block,
 };
 
 pub const FnParam = struct {
@@ -145,7 +145,9 @@ pub const Assignment = struct {
 };
 
 pub const Intrinsic = struct {};
-pub const Return = struct {};
+pub const Return = struct {
+    value: ?*Expr,
+};
 
 pub const LitKind = enum {
     Int,
@@ -359,6 +361,7 @@ pub const Printer = struct {
             Kind.struct_decl => self.printStructDecl(&expr.value.struct_decl),
             Kind.struct_value => self.printStructValue(&expr.value.struct_value),
             Kind.member_access => self.printMemberAccess(&expr.value.member_access),
+            Kind.returns => self.printReturn(&expr.value.returns),
             
             else => {
                 std.debug.panic("Not Implemented : print {s}", .{@tagName(expr.value)});
@@ -390,9 +393,9 @@ pub const Printer = struct {
         }
         self.memberEnd();
         
-        if (fn_decl.block) |block| {
+        if (fn_decl.body) |body| {
             self.memberBegin("body");
-            self.printBlock(&block);
+            self.printBlock(&body);
             self.memberEnd();
         }
         
@@ -624,6 +627,18 @@ pub const Printer = struct {
         self.memberEnd();
         
         self.memberWithValue("member", "'{s}'", .{self.tokenText(mem.member)});
+        
+        self.blockEnd();
+    }
+    
+    fn printReturn(self: *Printer, ret: *const Return) void {
+        self.blockBegin("Return");
+        
+        if (ret.value) |value| {
+            self.memberBegin("value");
+            self.printExpr(value);
+            self.memberEnd();
+        }
         
         self.blockEnd();
     }

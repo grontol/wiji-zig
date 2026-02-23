@@ -1,11 +1,14 @@
 const std = @import("std");
-const pretty = @import("pretty.zig");
 
 const FileManager = @import("file_manager.zig");
 const Reporter = @import("reporter.zig");
 const lexer = @import("lexer.zig");
 const parser = @import("parser.zig");
 const ast = @import("ast.zig");
+const tast = @import("tast.zig");
+const typer = @import("typer.zig");
+const SymbolManager = @import("symbol.zig").SymbolManager;
+const TypeManager = @import("type.zig").TypeManager;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -30,4 +33,11 @@ pub fn main() !void {
     
     var ast_printer: ast.Printer = .{ .file_manager = &file_manager };
     ast_printer.printModule(&ast_module);
+    
+    std.debug.print("\n----- TYPER -----\n\n", .{});
+    var symbol_manager = SymbolManager.init(allocator);
+    
+    const tast_module = typer.typecheck(allocator, reporter, &file_manager, &symbol_manager, &ast_module);
+    var tast_printer = tast.Printer.init();
+    tast_printer.printModule(&tast_module);
 }
