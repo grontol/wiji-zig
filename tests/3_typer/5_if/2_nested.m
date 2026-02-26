@@ -1,0 +1,174 @@
+fn main() {
+    val a = 10
+    val b = 20
+    val c = 4
+    
+    if a > 5 {
+        if b < 10 {
+            printf("If if\n")
+            
+            if c > 3 {
+                printf("Lolo\n")
+            }
+        }
+        else {
+            printf("If else\n")
+            
+            if c > 3 {
+                printf("c > 3\n")
+            } 
+        }
+        
+        printf("If end\n")
+    }
+    else {
+        printf("Else\n")
+    }
+}
+
+extern fn printf(fmt: string)
+
+/***
+Module {
+    fn_decls: [
+        FnDecl {
+            is_extern: false,
+            is_public: false,
+            name: 'main',
+            params: [],
+            body: Block {
+                stmts: [
+                    VarDecl {
+                        name: 'a',
+                        type: i32,
+                        value: <int> 10,
+                    },
+                    VarDecl {
+                        name: 'b',
+                        type: i32,
+                        value: <int> 20,
+                    },
+                    VarDecl {
+                        name: 'c',
+                        type: i32,
+                        value: <int> 4,
+                    },
+                    If {
+                        cond: <bool> Binary {
+                            lhs: <i32> Identifier('a'),
+                            rhs: <i32> Cast {
+                                value: <int> 5,
+                            },
+                            op: gt,
+                        },
+                        body: Block {
+                            stmts: [
+                                If {
+                                    cond: <bool> Binary {
+                                        lhs: <i32> Identifier('b'),
+                                        rhs: <i32> Cast {
+                                            value: <int> 10,
+                                        },
+                                        op: lt,
+                                    },
+                                    body: Block {
+                                        stmts: [
+                                            FnCall {
+                                                callee: <fn(string): void> Identifier('printf'),
+                                                args: [
+                                                    <string> "If if\n",
+                                                ],
+                                                return_type: void,
+                                            },
+                                            If {
+                                                cond: <bool> Binary {
+                                                    lhs: <i32> Identifier('c'),
+                                                    rhs: <i32> Cast {
+                                                        value: <int> 3,
+                                                    },
+                                                    op: gt,
+                                                },
+                                                body: Block {
+                                                    stmts: [
+                                                        FnCall {
+                                                            callee: <fn(string): void> Identifier('printf'),
+                                                            args: [
+                                                                <string> "Lolo\n",
+                                                            ],
+                                                            return_type: void,
+                                                        },
+                                                    ],
+                                                },
+                                            },
+                                        ],
+                                    },
+                                    else: Block {
+                                        stmts: [
+                                            FnCall {
+                                                callee: <fn(string): void> Identifier('printf'),
+                                                args: [
+                                                    <string> "If else\n",
+                                                ],
+                                                return_type: void,
+                                            },
+                                            If {
+                                                cond: <bool> Binary {
+                                                    lhs: <i32> Identifier('c'),
+                                                    rhs: <i32> Cast {
+                                                        value: <int> 3,
+                                                    },
+                                                    op: gt,
+                                                },
+                                                body: Block {
+                                                    stmts: [
+                                                        FnCall {
+                                                            callee: <fn(string): void> Identifier('printf'),
+                                                            args: [
+                                                                <string> "c > 3\n",
+                                                            ],
+                                                            return_type: void,
+                                                        },
+                                                    ],
+                                                },
+                                            },
+                                        ],
+                                    },
+                                },
+                                FnCall {
+                                    callee: <fn(string): void> Identifier('printf'),
+                                    args: [
+                                        <string> "If end\n",
+                                    ],
+                                    return_type: void,
+                                },
+                            ],
+                        },
+                        else: Block {
+                            stmts: [
+                                FnCall {
+                                    callee: <fn(string): void> Identifier('printf'),
+                                    args: [
+                                        <string> "Else\n",
+                                    ],
+                                    return_type: void,
+                                },
+                            ],
+                        },
+                    },
+                ],
+            },
+        },
+        FnDecl {
+            is_extern: true,
+            is_public: false,
+            name: 'printf',
+            params: [
+                FnParam {
+                    name: 'fmt',
+                    type: string,
+                },
+            ],
+        },
+    ],
+}
+***/

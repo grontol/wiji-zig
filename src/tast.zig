@@ -11,23 +11,30 @@ pub const Block = struct {
     stmts: []const Stmt,
 };
 
+pub const BlockExpr = struct {
+    stmts: []const Stmt,
+    last_expr: *Expr,
+};
+
 pub const VarDecl = struct {
     name: Symbol,
     value: ?*Expr,
     typ: *const Type,
 };
 
+pub const AssignmentOp = enum {
+    eq,
+    plus_eq,
+    minus_eq,
+    mul_eq,
+    div_eq,
+    mod_eq,
+};
+
 pub const Assignment = struct {
     lhs: *Expr,
     rhs: *Expr,
-    op: enum {
-        eq,
-        plus_eq,
-        minus_eq,
-        mul_eq,
-        div_eq,
-        mod_eq,
-    },
+    op: AssignmentOp,
 };
 
 pub const FnParam = struct {
@@ -53,8 +60,15 @@ pub const FnCall = struct {
 
 pub const If = struct {
     condition: *Expr,
-    body: *Block,
+    body: *Stmt,
     else_stmt: ?*Stmt,
+    as_expr: ?*Expr = null,
+};
+
+pub const IfExpr = struct {
+    condition: *Expr,
+    true_expr: *Expr,
+    false_expr: *Expr,
 };
 
 pub const Return = struct {
@@ -63,6 +77,26 @@ pub const Return = struct {
 
 pub const Identifier = struct {
     name: Symbol,
+};
+
+pub const Binop = enum {
+    add,
+    sub,
+    mul,
+    div,
+    mod,
+    gt,
+    gte,
+    lt,
+    lte,
+    eq_eq,
+    not_eq,
+};
+
+pub const Binary = struct {
+    lhs: *Expr,
+    rhs: *Expr,
+    op: Binop,
 };
 
 pub const LiteralKind = enum {
@@ -81,6 +115,11 @@ pub const Literal = union(LiteralKind) {
     bool: bool,
 };
 
+pub const Cast = struct {
+    value: *Expr,
+    typ: *const Type,
+};
+
 pub const StmtKind = enum {
     module,
     block,
@@ -91,6 +130,7 @@ pub const StmtKind = enum {
     for_range,
     whil,
     returns,
+    expr,
 };
 
 pub const Stmt = union(StmtKind) {
@@ -103,6 +143,30 @@ pub const Stmt = union(StmtKind) {
     for_range,
     whil,
     returns: Return,
+    expr: Expr,
+    
+    pub fn canBeUsedAsExpr(self: *const Stmt) bool {
+        switch (self.*) {
+            .fn_call,
+            .expr => { return true; },
+            .iff => |iff| {
+                return iff.as_expr != null;
+            },
+            
+            else => { return false; },
+        }
+    }
+    
+    pub fn transformToExpr(self: *const Stmt) Expr {
+        switch (self.*) {
+            .expr => |expr| { return expr; },
+            .iff  => |iff|  { return iff.as_expr.?.*; },
+            
+            else => {
+                std.debug.panic("Cannot transform stmt {s} to expr", .{@tagName(self.*)});
+            }
+        }
+    }
 };
 
 pub const ExprKind = enum {
@@ -116,37 +180,37 @@ pub const ExprKind = enum {
     struct_value,
     struct_member,
     cast,
+    iff,
+    block,
 };
 
 pub const Expr = struct {
     value: union(ExprKind) {
         identifier: Identifier,
         literal: Literal,
-        binary,
-        fn_call,
+        binary: Binary,
+        fn_call: FnCall,
         range,
         array_value,
         array_index,
         struct_value,
         struct_member,
-        cast,
+        cast: Cast,
+        iff: IfExpr,
+        block: BlockExpr,
     },
     typ: *const Type,
 };
 
 pub const Printer = struct {
-    gpa: std.heap.GeneralPurposeAllocator(.{}),
     allocator: std.mem.Allocator,
     temp_text: std.ArrayList(u8) = .empty,
     
     level: usize = 0,
     
-    pub fn init() Printer {
-        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-        
+    pub fn init(allocator: std.mem.Allocator) Printer {
         return .{
-            .gpa = gpa,
-            .allocator = gpa.allocator(),
+            .allocator = allocator,
         };
     }
     
@@ -156,7 +220,6 @@ pub const Printer = struct {
     
     fn getTypeText(self: *Printer, typ: *const Type) []const u8 {
         self.temp_text.clearRetainingCapacity();
-        
         typ.getText(&self.temp_text, self.allocator);
         
         return self.temp_text.items;
@@ -305,10 +368,39 @@ pub const Printer = struct {
         self.blockEnd();
     }
     
+    fn printBlockExpr(self: *Printer, block: *const BlockExpr) void {
+        self.blockBegin("BlockExpr");
+        
+        self.memberBegin("stmts");
+        if (block.stmts.len > 0) {
+            self.arrayBegin();
+            
+            for (block.stmts) |stmt| {
+                self.indentCurrent();
+                self.printStmt(&stmt);
+                self.commaNl();
+            }
+            
+            self.arrayEnd();
+        }
+        else {
+            self.arrayEmpty();
+        }
+        self.memberEnd();
+        
+        self.blockEnd();
+    }
+    
     fn printStmt(self: *Printer, stmt: *const Stmt) void {
         switch (stmt.*) {
-            StmtKind.var_decl => { self.printVarDecl(&stmt.var_decl); },
-            StmtKind.returns => { self.printReturn(&stmt.returns); },
+            StmtKind.var_decl   => { self.printVarDecl(&stmt.var_decl); },
+            StmtKind.assignment => { self.printAssignment(&stmt.assignment); },
+            StmtKind.fn_call    => { self.printFnCall(&stmt.fn_call); },
+            StmtKind.returns    => { self.printReturn(&stmt.returns); },
+            StmtKind.iff        => { self.printIf(&stmt.iff); },
+            StmtKind.block      => { self.printBlock(&stmt.block); },
+            StmtKind.expr       => { self.printExpr(&stmt.expr); },
+            
             else => {
                 std.debug.panic("TODO: printStmt {s}", .{@tagName(stmt.*)});
             }
@@ -330,6 +422,51 @@ pub const Printer = struct {
         self.blockEnd();
     }
     
+    fn printAssignment(self: *Printer, ass: *const Assignment) void {
+        self.blockBegin("Assignment");
+        
+        self.memberBegin("lhs");
+        self.printExpr(ass.lhs);
+        self.memberEnd();
+        
+        self.memberBegin("rhs");
+        self.printExpr(ass.rhs);
+        self.memberEnd();
+        
+        self.memberWithValue("op", "{s}", .{@tagName(ass.op)});
+        
+        self.blockEnd();
+    }
+    
+    fn printFnCall(self: *Printer, call: *const FnCall)  void {
+        self.blockBegin("FnCall");
+        
+        self.memberBegin("callee");
+        self.printExpr(call.callee);
+        self.memberEnd();
+        
+        self.memberBegin("args");
+        if (call.args.len > 0) {
+            self.arrayBegin();
+            
+            for (call.args) |arg| {
+                self.indentCurrent();
+                self.printExpr(&arg);
+                self.commaNl();
+            }
+            
+            self.arrayEnd();
+        }
+        else {
+            self.arrayEmpty();
+        }
+        self.memberEnd();
+        
+        self.memberWithValue("return_type", "{s}", .{self.getTypeText(call.return_typ)});
+        
+        self.blockEnd();
+    }
+    
     fn printReturn(self: *Printer, ret: *const Return) void {
         self.blockBegin("Return");
         
@@ -342,12 +479,38 @@ pub const Printer = struct {
         self.blockEnd();
     }
     
+    fn printIf(self: *Printer, iff: *const If) void {
+        self.blockBegin("If");
+        
+        self.memberBegin("cond");
+        self.printExpr(iff.condition);
+        self.memberEnd();
+        
+        self.memberBegin("body");
+        self.printStmt(iff.body);
+        self.memberEnd();
+        
+        if (iff.else_stmt) |else_stmt| {
+            self.memberBegin("else");
+            self.printStmt(else_stmt);
+            self.memberEnd();
+        }
+        
+        self.blockEnd();
+    }
+    
     fn printExpr(self: *Printer, expr: *const Expr) void {
-        self.print("<{s}>", .{self.getTypeText(expr.typ)});
+        self.print("<{s}> ", .{self.getTypeText(expr.typ)});
         
         switch (expr.value) {
-            .literal => |lit| { self.printLiteral(&lit); },
+            .literal    => |lit|   { self.printLiteral(&lit); },
             .identifier => |ident| { self.print("Identifier('{s}')", .{ident.name.text}); },
+            .fn_call    => |call|  { self.printFnCall(&call); },
+            .binary     => |bin|   { self.printBinary(&bin); },
+            .cast       => |cast|  { self.printCast(&cast); },
+            .iff        => |iff|   { self.printIfExpr(&iff); },
+            .block      => |block| { self.printBlockExpr(&block); },
+            
             else => {
                 std.debug.panic("TODO: printExpr {s}", .{@tagName(expr.value)});
             }
@@ -373,5 +536,49 @@ pub const Printer = struct {
             },
             .bool => |v| { self.print("{}", .{v}); },
         }
+    }
+    
+    fn printBinary(self: *Printer, bin: *const Binary) void {
+        self.blockBegin("Binary");
+        
+        self.memberBegin("lhs");
+        self.printExpr(bin.lhs);
+        self.memberEnd();
+        
+        self.memberBegin("rhs");
+        self.printExpr(bin.rhs);
+        self.memberEnd();
+        
+        self.memberWithValue("op", "{s}", .{@tagName(bin.op)});
+        
+        self.blockEnd();
+    }
+    
+    fn printCast(self: *Printer, cast: *const Cast) void {
+        self.blockBegin("Cast");
+        
+        self.memberBegin("value");
+        self.printExpr(cast.value);
+        self.memberEnd();
+        
+        self.blockEnd();
+    }
+    
+    fn printIfExpr(self: *Printer, iff: *const IfExpr) void {
+        self.blockBegin("IfExpr");
+        
+        self.memberBegin("cond");
+        self.printExpr(iff.condition);
+        self.memberEnd();
+        
+        self.memberBegin("true_expr");
+        self.printExpr(iff.true_expr);
+        self.memberEnd();
+        
+        self.memberBegin("false_expr");
+        self.printExpr(iff.false_expr);
+        self.memberEnd();
+        
+        self.blockEnd();
     }
 };

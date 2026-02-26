@@ -1,0 +1,41 @@
+fn main() {
+    val x = 3
+    
+    for a in 0..x {
+        printf("%d\n", a)
+    }
+    
+    printf("\n")
+    for a in 0..x printf("%d\n", a)
+    printf("\n")
+    for a in x printf("%d\n", a)
+    printf("\n")
+    for x printf("x\n")
+    printf("\n")
+    for 3 printf("?\n")
+//    for 10 printf("x\n")
+}
+
+extern fn printf(fmt: string, ...values: any)
+
+/***
+0
+1
+2
+
+0
+1
+2
+
+0
+1
+2
+
+x
+x
+x
+
+?
+?
+?
+***/

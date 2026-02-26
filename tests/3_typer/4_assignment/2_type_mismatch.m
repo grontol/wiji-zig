@@ -1,0 +1,7 @@
+fn main() {
+    const x: i32 = "str"
+}
+
+/***
+Type 'string' cannot be assigned to 'i32'
+***/

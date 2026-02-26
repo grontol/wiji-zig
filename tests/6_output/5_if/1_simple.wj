@@ -1,0 +1,17 @@
+fn main() {
+    val x = 10
+    
+    if x < 10 printf("x < 10\n")
+    else printf("x >= 10\n")
+    
+    if x < 5 printf("x < 5\n")
+    else if x > 5 printf("x > 5\n")
+    else printf("x = 5\n")
+}
+
+extern fn printf(fmt: string, ...values: any)
+
+/***
+x >= 10
+x > 5
+***/

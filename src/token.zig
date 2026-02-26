@@ -88,6 +88,29 @@ pub const TokenKind = enum(u16) {
     pub fn is_binop(self: TokenKind) bool {
         return @intFromEnum(self) >> 8 == TAG_BINOP;
     }
+    
+    pub fn getBinopText(self: TokenKind) []const u8 {
+        switch (self) {
+            .Plus   => { return "+"; },
+            .Minus  => { return "-"; },
+            .Mul    => { return "*"; },
+            .Div    => { return "/"; },
+            .Mod    => { return "%"; },
+            .Gt     => { return ">"; },
+            .Gte    => { return ">="; },
+            .Lt     => { return "<"; },
+            .Lte    => { return "<="; },
+            .EqEq   => { return "=="; },
+            .Not    => { return "!"; },
+            .NotEq  => { return "!="; },
+            .Or     => { return "|"; },
+            .OrOr   => { return "||"; },
+            .And    => { return "&"; },
+            .AndAnd => { return "&&"; },
+            
+            else    => { return ""; },
+        }
+    }
 };
 
 pub const TokenLoc = struct {

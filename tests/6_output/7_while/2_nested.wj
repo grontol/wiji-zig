@@ -1,0 +1,36 @@
+fn main() {
+    val a = 0
+
+    while a < 5 {
+        printf("%d -> ", a)
+        
+        if a % 2 == 0 printf("Even\n")
+        else printf("Odd\n")
+        
+        var c = 0
+        
+        while c <= a {
+            printf("x")
+            c += 1
+        }
+        
+        printf("\n")
+        
+        a += 1
+    }
+}
+
+extern fn printf(fmt: string, ...values: any)
+
+/***
+0 -> Even
+x
+1 -> Odd
+xx
+2 -> Even
+xxx
+3 -> Odd
+xxxx
+4 -> Even
+xxxxx
+***/

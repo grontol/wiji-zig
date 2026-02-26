@@ -1,0 +1,61 @@
+fn main() {
+    const t = 3
+
+    {
+        var a = 0
+        while a < t {
+            printf("%d\n", a)
+            a += 1
+        }
+    }
+    
+    printf("\n")
+    
+    {
+        var a = t
+        while a > 0 {
+            printf("%d\n", a)
+            a -= 1
+        }
+    }
+    
+    printf("\n")
+
+    {
+        var a = 0
+        while a < t * 2 {
+            printf("%d\n", a)
+            a += 2
+        }
+    }
+    
+    printf("\n")
+    
+    {
+        var a = t * 2
+        while a > 0 {
+            printf("%d\n", a)
+            a -= 2
+        }
+    }
+}
+
+extern fn printf(fmt: string, ...values: any)
+
+/***
+0
+1
+2
+
+3
+2
+1
+
+0
+2
+4
+
+6
+4
+2
+***/

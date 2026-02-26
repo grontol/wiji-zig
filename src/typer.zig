@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const Token = @import("token.zig").Token;
+const TokenKind = @import("token.zig").TokenKind;
 const TokenSpan = @import("token.zig").TokenSpan;
 const ast = @import("ast.zig");
 const types = @import("type.zig");
@@ -179,6 +180,10 @@ const Typer = struct {
         
         for (fn_decls.items, fn_decl_indices.items) |*fn_decl, i| {
             if (exprs[i].value.fn_decl.body) |_| {
+                if (fn_decl.is_extern) {
+                    self.reporter.reportErrorAtSpan(exprs[i].span, "extern function cannot have a body");
+                }
+                
                 self.typeFnDeclBody(scope, &exprs[i].value.fn_decl, fn_decl);
             }
             else {
@@ -195,10 +200,20 @@ const Typer = struct {
     
     fn typeStmt(self: *Typer, scope: *Scope, stmt: *const ast.Expr) tast.Stmt {
         switch (stmt.value) {
-            .var_decl => |decl| { return self.typeVarDecl(scope, &decl); },
-            .returns => |ret| { return self.typeReturn(scope, &ret, stmt.span); },
+            .var_decl   => |decl|  { return self.typeVarDecl(scope, &decl); },
+            .assignment => |ass|   { return self.typeAssignment(scope, &ass); },
+            .fn_call    => |call|  { return self.typeFnCallStmt(scope, &call, stmt.span); },
+            .returns    => |ret|   { return self.typeReturn(scope, &ret, stmt.span); },
+            .iff        => |iff|   { return self.typeIf(scope, &iff); },
+            .block      => |block| { return self.typeBlockStmt(scope, &block); },
             
             else => {
+                if (stmt.canBeUsedAsExpr()) {
+                    return .{
+                        .expr = self.typeExpr(scope, stmt),
+                    };
+                }
+                
                 std.debug.panic("TODO: typeStmt {s}", .{@tagName(stmt.value)});
             }
         }
@@ -300,7 +315,7 @@ const Typer = struct {
         };
     }
     
-    fn typeFnDeclBody(self: *Typer, scope: *Scope, fn_decl_ast: *const ast.FnDecl, forward_decl: *tast.FnDecl) void {
+    fn typeFnDeclBody(self: *Typer, scope: *Scope, fn_decl_ast: *const ast.FnDecl, forward_decl: *tast.FnDecl) void {        
         var new_scope = scope.inherit();
         defer new_scope.deinit();
         
@@ -320,6 +335,59 @@ const Typer = struct {
         }
         
         self.cur_fn = parent_fn;
+    }
+    
+    fn typeBlockStmt(self: *Typer, scope: *Scope, block: *const ast.Block) tast.Stmt {
+        return .{
+            .block = self.typeBlock(scope, block),
+        };
+    }
+    
+    fn typeBlockExpr(self: *Typer, scope: *Scope, block: *const ast.Block, span: TokenSpan) tast.Expr {
+        if (block.exprs.len == 0) {
+            self.reporter.reportErrorAtSpan(span, "Block should have an expression");
+        }
+        
+        // TODO: Handle edge cases like:
+        // - Block with struct decl as last stmt
+        // - Block with function decl as last stmt
+        
+        const stmts = self.typeStmts(scope, block.exprs);
+        
+        if (stmts.len == 0) {
+            self.reporter.reportErrorAtSpan(span, "Struct or function declaration cannot be the only statement in a block expression");
+        }
+        
+        const last_stmt = stmts[stmts.len - 1];
+        var last_expr: *tast.Expr = undefined;
+        
+        if (last_stmt.canBeUsedAsExpr()) {
+            last_expr = self.makeExprPointer(last_stmt.transformToExpr());
+        }
+        else {
+            var i: i32 = @intCast(block.exprs.len - 1);
+            var last_stmt_span: TokenSpan = undefined;
+            
+            while (i >= 0) : (i -= 1) {
+                switch (block.exprs[@intCast(i)].value) {
+                    .fn_decl,
+                    .struct_decl => {},
+                    else => {
+                        last_stmt_span = block.exprs[@intCast(i)].span;
+                    },
+                }
+            }
+            
+            self.reporter.reportErrorAtSpan(last_stmt_span, "Statement cannot be used as expression");
+        }
+        
+        return .{
+            .typ = &types.UNKNOWN,
+            .value = .{.block = .{
+                .stmts = stmts,
+                .last_expr = last_expr,
+            }},
+        };
     }
     
     fn typeBlock(self: *Typer, scope: *Scope, block: *const ast.Block) tast.Block {
@@ -432,6 +500,121 @@ const Typer = struct {
         };
     }
     
+    fn typeAssignment(self: *Typer, scope: *Scope, ass: *const ast.Assignment) tast.Stmt {
+        const lhs = self.makeExprPointer(self.typeExpr(scope, ass.lhs));
+        const rhs = self.makeExprPointer(self.typeExpr(scope, ass.rhs));
+        
+        // Check if lhs is a lvalue
+        switch (lhs.value) {
+            .identifier,
+            .array_index => {},
+            
+            else => {
+                self.reporter.reportErrorAtSpan(ass.lhs.span, "Cannot assign to rvalue");
+            }
+        }
+        
+        if (!rhs.typ.canBeAssignedTo(lhs.typ)) {
+            self.reporter.reportErrorAtSpanArgs(
+                ass.rhs.span,
+                "Type {s} cannot be assigned to {s}",
+                .{
+                    rhs.typ.getTextLeak(self.temp_allocator),
+                    lhs.typ.getTextLeak(self.temp_allocator),
+                }
+            );
+        }
+        
+        const op: tast.AssignmentOp = switch (ass.op.kind) {
+            TokenKind.Eq      => .eq,
+            TokenKind.PlusEq  => .plus_eq,
+            TokenKind.MinusEq => .minus_eq,
+            TokenKind.MulEq   => .mul_eq,
+            TokenKind.DivEq   => .div_eq,
+            TokenKind.ModEq   => .mod_eq,
+            
+            else => unreachable,
+        };
+        
+        return .{.assignment = .{
+            .lhs = lhs,
+            .rhs = rhs,
+            .op = op,
+        }};
+    }
+    
+    fn typeFnCallStmt(self: *Typer, scope: *Scope, call: *const ast.FnCall, span: TokenSpan) tast.Stmt {
+        return .{
+            .fn_call = self.typeFnCall(scope, call, span),
+        };
+    }
+    
+    fn typeFnCallExpr(self: *Typer, scope: *Scope, call: *const ast.FnCall, span: TokenSpan) tast.Expr {
+        const tast_call = self.typeFnCall(scope, call, span);
+        
+        return .{
+            .typ = tast_call.return_typ,
+            .value = .{ .fn_call = tast_call },
+        };
+    }
+    
+    fn typeFnCall(self: *Typer, scope: *Scope, call: *const ast.FnCall, span: TokenSpan) tast.FnCall {
+        const callee = self.makeExprPointer(self.typeExpr(scope, call.callee));
+        
+        if (callee.typ.kind != types.TypeKind.func) {
+            self.reporter.reportErrorAtSpan(call.callee.span, "Cannot call something that is not a function");
+        }
+        
+        const is_variadic = callee.typ.value.func.is_variadic;
+        const param_types = callee.typ.value.func.params;
+        const return_type = callee.typ.value.func.returns;
+        
+        if (is_variadic) {
+            if (call.args.len < param_types.len) {
+                self.reporter.reportErrorAtSpanArgs(
+                    span,
+                    "Expected {} or more arguments but got {}",
+                    .{ param_types.len - 1, call.args.len },
+                );
+            }
+        }
+        else {
+            if (call.args.len != param_types.len) {
+                self.reporter.reportErrorAtSpanArgs(
+                    span,
+                    "Expected {} arguments but got {}",
+                    .{ param_types.len, call.args.len },
+                );
+            }
+        }
+        
+        var typed_args = std.ArrayList(tast.Expr).initCapacity(self.allocator, call.args.len) catch unreachable;
+        
+        for (call.args, 0..) |arg, i| {
+            const expr = self.typeExpr(scope, &arg);
+            typed_args.appendAssumeCapacity(expr);
+            
+            const index = if (i < param_types.len) i else if (is_variadic) param_types.len - 1 else unreachable;
+            
+            if (!expr.typ.canBeAssignedTo(param_types[index])) {
+                self.reporter.reportErrorAtSpanArgs(
+                    arg.span,
+                    "Expected type {s} but got {s}",
+                    .{
+                        param_types[index].getTextLeak(self.temp_allocator),
+                        expr.typ.getTextLeak(self.temp_allocator),
+                    },
+                );
+            }
+        }
+        
+        return .{
+            .callee = callee,
+            .args = typed_args.items,
+            .return_typ = return_type,
+        };
+    }
+    
     fn typeReturn(self: *Typer, scope: *Scope, ret: *const ast.Return, span: TokenSpan) tast.Stmt {
         var value: ?*tast.Expr = null;
         
@@ -467,10 +650,91 @@ const Typer = struct {
         return .{ .returns = .{ .value = value } };
     }
     
+    fn typeIf(self: *Typer, scope: *Scope, iff: *const ast.If) tast.Stmt {
+        const cond = self.makeExprPointer(self.typeExpr(scope, iff.condition));
+        
+        if (!cond.typ.canBeUsedAsCond()) {
+            self.reporter.reportErrorAtSpanArgs(iff.condition.span, "Type {s} cannot be used as condition", .{cond.typ.getTextLeak(self.temp_allocator)});
+        }
+        
+        var body: *tast.Stmt = undefined;
+        
+        if (iff.body.value == .block) {
+            var new_scope = scope.inherit();
+            defer new_scope.deinit();
+            
+            body = self.makeStmtPointer(self.typeBlockStmt(&new_scope, &iff.body.value.block));
+        }
+        else {
+            body = self.makeStmtPointer(self.typeStmt(scope, iff.body));
+        }
+        
+        var else_stmt: ?*tast.Stmt = null;
+        
+        if (iff.else_expr) |else_expr| {
+            else_stmt = self.makeStmtPointer(self.typeStmt(scope, else_expr));
+        }
+        
+        return .{
+            .iff = .{
+                .condition = cond,
+                .body = body,
+                .else_stmt = else_stmt,
+            }
+        };
+    }
+    
+    fn typeIfExpr(self: *Typer, scope: *Scope, iff: *const ast.If, span: TokenSpan) tast.Expr {
+        const cond = self.makeExprPointer(self.typeExpr(scope, iff.condition));
+        
+        if (!cond.typ.canBeUsedAsCond()) {
+            self.reporter.reportErrorAtSpanArgs(iff.condition.span, "Type {s} cannot be used as condition", .{cond.typ.getTextLeak(self.temp_allocator)});
+        }
+        
+        const true_expr = self.typeExpr(scope, iff.body);
+        var typ = true_expr.typ;
+        
+        const false_expr = if (iff.else_expr) |else_expr| blk: {
+            const expr = self.typeExpr(scope, else_expr);
+            
+            if (expr.typ.canBeCombinedWith(true_expr.typ)) {
+                typ = typ.combinedWith(expr.typ);
+            }
+            else {
+                self.reporter.reportErrorAtSpanArgs(
+                    span,
+                    "Cannot combine {s} and {s} as if expression",
+                    .{
+                        typ.getTextLeak(self.temp_allocator),
+                        expr.typ.getTextLeak(self.temp_allocator),
+                    },
+                );
+            }
+            
+            break :blk expr;
+        }
+        else {
+            self.reporter.reportErrorAtSpan(span, "if as an expression must have an else expression");
+        };
+        
+        return .{
+            .typ = typ,
+            .value = .{.iff = .{
+                .condition = cond,
+                .true_expr = self.makeExprPointer(true_expr),
+                .false_expr = self.makeExprPointer(false_expr),
+            }},
+        };
+    }
+    
     fn typeExpr(self: *Typer, scope: *Scope, expr: *const ast.Expr) tast.Expr {
         switch (expr.value) {
             ast.Kind.identifier => return self.typeIdentifier(scope, &expr.value.identifier),
-            ast.Kind.literal => return self.typeLiteral(scope, &expr.value.literal),
+            ast.Kind.literal    => return self.typeLiteral(scope, &expr.value.literal),
+            ast.Kind.fn_call    => return self.typeFnCallExpr(scope, &expr.value.fn_call, expr.span),
+            ast.Kind.binary     => return self.typeBinary(scope, &expr.value.binary, expr.span),
+            ast.Kind.iff        => return self.typeIfExpr(scope, &expr.value.iff, expr.span),
+            ast.Kind.block      => return self.typeBlockExpr(scope, &expr.value.block, expr.span),
             
             else => {
                 std.debug.panic("TODO: typeExpr {s}", .{@tagName(expr.value)});
@@ -583,6 +847,207 @@ const Typer = struct {
         }
     }
     
+    fn typeBinary(self: *Typer, scope: *Scope, bin: *const ast.Binary, span: TokenSpan) tast.Expr {
+        var lhs = self.typeExpr(scope, bin.lhs);
+        var rhs = self.typeExpr(scope, bin.rhs);
+        
+        var valid = false;
+        var need_explicit_cast = false;
+        var typ: *const Type = undefined;
+        
+        // All numeric   -> +, -, *, /, >, >=, <, <=, ==, !=
+        // Integer       -> %, |, &
+        // Bool          -> &, &&, |, ||
+        
+        if (lhs.typ.kind == .numeric and rhs.typ.kind == .numeric) {
+            switch (bin.op.kind) {
+                .Mod,
+                .Or,
+                .And => {
+                    // Noop
+                    // Not valid if one of the operand is float
+                },
+                .Plus,
+                .Minus,
+                .Mul,
+                .Div,
+                .Gt,
+                .Gte,
+                .Lt,
+                .Lte,
+                .EqEq,
+                .NotEq => {
+                    const lhs_kind = lhs.typ.value.numeric;
+                    const rhs_kind = rhs.typ.value.numeric;
+                    
+                    if (lhs_kind == rhs_kind) {
+                        typ = lhs.typ;
+                        valid = true;
+                    }
+                    else {
+                        const l_is_untyped = lhs_kind.isUntyped();
+                        const r_is_untyped = rhs_kind.isUntyped();
+                        
+                        const l_is_int = lhs_kind.isInt();
+                        const r_is_int = rhs_kind.isInt();
+                        
+                        const l_is_float = lhs_kind.isFloat();
+                        const r_is_float = rhs_kind.isFloat();
+                        
+                        // If both is untyped
+                        // One of them is untyped float and one of them is untyped int
+                        // The resulting type is untyped float by casting the untyped int into untyped float
+                        if (l_is_untyped and r_is_untyped) {
+                            // If lhs is a float, cast rhs into float
+                            if (l_is_float) {
+                                rhs = tast.Expr{
+                                    .typ = lhs.typ,
+                                    .value = .{.cast = .{
+                                        .typ = lhs.typ,
+                                        .value = self.makeExprPointer(rhs),
+                                    }}
+                                };
+                                
+                                typ = lhs.typ;
+                            }
+                            // If rhs is a float, cast lhs into float
+                            // rhs should be a float here, because lhs is not float and rhs is not the same as lhs
+                            // (already checked above)
+                            else {
+                                lhs = tast.Expr{
+                                    .typ = rhs.typ,
+                                    .value = .{.cast = .{
+                                        .typ = rhs.typ,
+                                        .value = self.makeExprPointer(lhs),
+                                    }}
+                                };
+                                
+                                typ = rhs.typ;
+                            }
+                            
+                            valid = true;
+                        }
+                        else if (l_is_untyped) {
+                            // If both is int or both is float
+                            // The resulting type is the untyped one, in this case is rhs
+                            // Or, if lhs is untyped int and rhs is float
+                            // Allow implicit cast
+                            if (l_is_int == r_is_int or r_is_float) {
+                                lhs = tast.Expr{
+                                    .typ = rhs.typ,
+                                    .value = .{.cast = .{
+                                        .typ = rhs.typ,
+                                        .value = self.makeExprPointer(lhs),
+                                    }}
+                                };
+                                
+                                typ = rhs.typ;
+                                valid = true;
+                            }
+                            else {
+                                need_explicit_cast = true;
+                            }
+                        }
+                        else if (r_is_untyped) {
+                            // If both is int or both is float
+                            // The resulting type is the untyped one, in this case is lhs
+                            // Or, if rhs is untyped int and lhs is float
+                            // Allow implicit cast
+                            if (l_is_int == r_is_int or l_is_float) {
+                                rhs = tast.Expr{
+                                    .typ = lhs.typ,
+                                    .value = .{.cast = .{
+                                        .typ = lhs.typ,
+                                        .value = self.makeExprPointer(rhs),
+                                    }}
+                                };
+                                
+                                typ = lhs.typ;
+                                valid = true;
+                            }
+                            else {
+                                need_explicit_cast = true;
+                            }
+                        }
+                        else {
+                            need_explicit_cast = true;
+                        }
+                    }
+                    
+                    switch (bin.op.kind) {
+                        .Gt,
+                        .Gte,
+                        .Lt,
+                        .Lte,
+                        .EqEq,
+                        .NotEq => {
+                            typ = &types.BOOL;
+                        },
+                        else => {},
+                    }
+                },
+                else => {},
+            }
+        }
+        else if (lhs.typ.kind == .bool and rhs.typ.kind == .bool) {
+            switch (bin.op.kind) {
+                .AndAnd,
+                .OrOr => {
+                    valid = true;
+                    typ = &types.BOOL;
+                },
+                else => {},
+            }
+        }
+        
+        if (need_explicit_cast) {
+            self.reporter.reportErrorAtSpanArgs(
+                span,
+                "Need explicit cast in binary operation {s} for type {s} and {s}",
+                .{
+                    bin.op.kind.getBinopText(),
+                    lhs.typ.getTextLeak(self.temp_allocator),
+                    rhs.typ.getTextLeak(self.temp_allocator),
+                },
+            );
+        }
+        else if (!valid) {
+            self.reporter.reportErrorAtTokenArgs(
+                bin.op,
+                "Invalid binary operation {s} for type {s} and {s}",
+                .{
+                    bin.op.kind.getBinopText(),
+                    lhs.typ.getTextLeak(self.temp_allocator),
+                    rhs.typ.getTextLeak(self.temp_allocator),
+                },
+            );
+        }
+        
+        const binop: tast.Binop = switch (bin.op.kind) {
+            .Plus => .add,
+            .Minus =>.sub,
+            .Mul => .mul,
+            .Div => .div,
+            .Mod => .mod,
+            .Gt => .gt,
+            .Gte => .gte,
+            .Lt => .lt,
+            .Lte => .lte,
+            .EqEq => .eq_eq,
+            .NotEq => .not_eq,
+            else => unreachable,
+        };
+        
+        return .{
+            .typ = typ,
+            .value = .{.binary = .{
+                .lhs = self.makeExprPointer(lhs),
+                .rhs = self.makeExprPointer(rhs),
+                .op = binop,
+            }},
+        };
+    }
+    
     fn typeType(self: *Typer, scope: *Scope, typ: *const ast.Type) *const Type {
         var result_type: *const Type = undefined;
         
@@ -638,6 +1103,13 @@ const Typer = struct {
         }
         
         return result_type;
+    }
+    
+    fn makeStmtPointer(self: *Typer, stmt: tast.Stmt) *tast.Stmt {
+        const p = self.allocator.create(tast.Stmt) catch unreachable;
+        p.* = stmt;
+        
+        return p;
     }
     
     fn makeExprPointer(self: *Typer, expr: tast.Expr) *tast.Expr {

@@ -214,6 +214,34 @@ pub const Expr = struct {
         intrinsic: Intrinsic,
         returns: Return,
     },
+    
+    pub fn canBeUsedAsExpr(self: *const Expr) bool {
+        switch (self.value) {
+            .var_decl,
+            .struct_decl => return false,
+            
+            else => return true,
+        }
+    }
+    
+    pub fn hasValueWhenUsedAsExpr(self: *const Expr) bool {
+        switch (self.value) {
+            .identifier,
+            .range,
+            .literal,
+            .array_value,
+            .struct_value,
+            .binary,
+            .fn_call,
+            .member_access,
+            .array_index,
+            .iff,
+            .intrinsic,
+            .returns => return true,
+            
+            else => return false,
+        }
+    }
 };
 
 pub const TypeKind = enum {
@@ -329,15 +357,22 @@ pub const Printer = struct {
     pub fn printModule(self: *Printer, module: *const Module) void {
         self.blockBegin("Module");
         self.memberBegin("exprs");
-        self.arrayBegin();
         
-        for (module.exprs) |expr| {
-            self.indentCurrent();
-            self.printExpr(&expr);
-            self.commaNl();
+        if (module.exprs.len > 0) {
+            self.arrayBegin();
+            
+            for (module.exprs) |expr| {
+                self.indentCurrent();
+                self.printExpr(&expr);
+                self.commaNl();
+            }
+            
+            self.arrayEnd();
+        }
+        else {
+            self.arrayEmpty();
         }
         
-        self.arrayEnd();
         self.memberEnd();
         self.blockEnd();
         self.nl();

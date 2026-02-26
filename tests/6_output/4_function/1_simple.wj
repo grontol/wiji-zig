@@ -1,0 +1,13 @@
+fn main() {
+    foo()
+}
+
+fn foo() {
+    printf("Foo\n")
+}
+
+extern fn printf(fmt: string, ...values: any)
+
+/***
+Foo
+***/

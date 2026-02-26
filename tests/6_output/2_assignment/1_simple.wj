@@ -1,0 +1,9 @@
+fn main() {
+    val a: i32
+    val b: char
+    val c: string
+    
+    a = 20
+    b = '\n'
+    c = "Sontholoyo"
+}

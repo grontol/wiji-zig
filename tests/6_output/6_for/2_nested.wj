@@ -1,0 +1,165 @@
+fn main() {
+    val y = 7
+
+    if y < 10 {
+        printf("< 10\n")
+
+        for a in 0..y {
+            printf("%d -> ", a)
+
+            if a % 2 == 0 printf("Genap\n")
+            else printf("Ganjil\n")
+
+            for b in a {
+                printf("%d\n", b + 1)
+                
+                for c in b {
+                    if c % 2 == 0 printf ("  xxx ")
+                    else printf("  ")
+                    
+                    printf("  %d\n", c + 1)
+                }
+            }
+        }
+
+        if false {
+            printf("True\n")
+        }
+        else {
+            printf("False\n")
+        }
+    }
+    else if y > 10 {
+        printf("> 10\n")
+    }
+    else {
+        printf("= 10\n")
+
+        for a in y..y + 3 {
+            printf("%d\n", a * 10)
+        }
+    }
+
+    val x = 3
+    val z = 3
+
+    if x < 4 {
+        printf("x < 4\n")
+
+        if z < 4 printf("1 y < 4\n")
+        else if z > 4 printf("1 y > 4\n")
+        else printf("1 y == 4\n")
+    }
+    else if x > 4 {
+        printf("x > 4\n")
+
+        if z < 4 printf("2 y < 4\n")
+        else if z > 4 printf("2 y > 4\n")
+        else printf("2 y == 4\n")
+    }
+    else {
+        printf("x == 4\n")
+
+        if z < 4 printf("3 y < 4\n")
+        else if z > 4 printf("3 y > 4\n")
+        else printf("3 y == 4\n")
+    }
+    
+    printf("\n-----------------------\n")
+    
+    for a in 10 {
+        for a + 1 printf("*")
+        
+        printf("\n")
+    }
+    
+    printf("-----------------------\n")
+
+    printf("Done\n")
+}
+
+extern fn printf(fmt: string, ...values: any)
+
+/***
+< 10
+0 -> Genap
+1 -> Ganjil
+1
+2 -> Genap
+1
+2
+  xxx   1
+3 -> Ganjil
+1
+2
+  xxx   1
+3
+  xxx   1
+    2
+4 -> Genap
+1
+2
+  xxx   1
+3
+  xxx   1
+    2
+4
+  xxx   1
+    2
+  xxx   3
+5 -> Ganjil
+1
+2
+  xxx   1
+3
+  xxx   1
+    2
+4
+  xxx   1
+    2
+  xxx   3
+5
+  xxx   1
+    2
+  xxx   3
+    4
+6 -> Genap
+1
+2
+  xxx   1
+3
+  xxx   1
+    2
+4
+  xxx   1
+    2
+  xxx   3
+5
+  xxx   1
+    2
+  xxx   3
+    4
+6
+  xxx   1
+    2
+  xxx   3
+    4
+  xxx   5
+False
+x < 4
+1 y < 4
+
+-----------------------
+*
+**
+***
+****
+*****
+******
+*******
+********
+*********
+**********
+-----------------------
+Done
+***/

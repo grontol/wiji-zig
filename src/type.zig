@@ -22,6 +22,22 @@ pub const NumericKind = enum(u16) {
     
     untyped_int     = TYPE_FLAG_INT   | TYPE_FLAG_UNTYPED,
     untyped_float   = TYPE_FLAG_FLOAT | TYPE_FLAG_UNTYPED,
+    
+    pub fn isInt(self: NumericKind) bool {
+        return @intFromEnum(self) & TYPE_FLAG_INT != 0;
+    }
+    
+    pub fn isFloat(self: NumericKind) bool {
+        return @intFromEnum(self) & TYPE_FLAG_FLOAT != 0;
+    }
+    
+    pub fn isUntyped(self: NumericKind) bool {
+        return @intFromEnum(self) & TYPE_FLAG_UNTYPED != 0;
+    }
+    
+    pub fn isUnsigned(self: NumericKind) bool {
+        return @intFromEnum(self) & TYPE_FLAG_UNSIGNED != 0;
+    }
 };
 
 pub const TypeKind = enum {
@@ -145,6 +161,20 @@ pub const Type = struct {
         return true;
     }
     
+    pub fn canBeUsedAsCond(self: *const Type) bool {
+        switch (self.kind) {
+            TypeKind.bool,
+            TypeKind.numeric,
+            TypeKind.char => return true,
+            
+            else => return false,
+        }
+    }
+    
+    pub fn canBeCombinedWith(self: *const Type, other: *const Type) bool {
+        return self.isSame(other);
+    }
+    
     pub fn isSame(self: *const Type, other: *const Type) bool {
         if (self.type_id == other.type_id) return true;
         if (self.kind != other.kind) return false;
@@ -204,6 +234,12 @@ pub const Type = struct {
         return self;
     }
     
+    pub fn combinedWith(self: *const Type, other: *const Type) *const Type {
+        _ = self;
+        
+        return other;
+    }
+    
     pub fn getTextLeak(self: *const Type, allocator: std.mem.Allocator) []const u8 {
         var str = std.ArrayList(u8).empty;
         self.getText(&str, allocator);
@@ -258,7 +294,7 @@ pub const Type = struct {
                     param.getText(out, allocator);
                 }
                 
-                out.appendSlice(allocator, "):") catch unreachable;
+                out.appendSlice(allocator, "): ") catch unreachable;
                 self.value.func.returns.getText(out, allocator);
             },
             

@@ -1,0 +1,7 @@
+fn foo(a: string = 10) {
+    
+}
+
+/***
+Expected 'string' but got 'int'
+***/

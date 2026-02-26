@@ -150,7 +150,10 @@ const Parser = struct {
             switch (self.ts.peek().kind) {
                 TokenKind.KeywordExtern,
                 TokenKind.KeywordPub => _ = self.ts.next(),
-                TokenKind.KeywordFn => res = true,
+                TokenKind.KeywordFn => {
+                    res = true;
+                    break;
+                },
                 else => break,
             }
         }

@@ -1,0 +1,17 @@
+fn main() {
+    for i in 5 foo(i)
+}
+
+fn foo(x: i32) {
+    printf("Foo %d\n", x)
+}
+
+extern fn printf(fmt: string, ...values: any)
+
+/***
+Foo 0
+Foo 1
+Foo 2
+Foo 3
+Foo 4
+***/

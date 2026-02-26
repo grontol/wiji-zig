@@ -1,0 +1,20 @@
+fn main() {
+    for a in 20 {
+        if a > 0 printf(", ")
+        printf("%d", fib(a))
+    }
+    
+    printf("\n")
+}
+
+fn fib(a: i32): i32 {
+    if a <= 1 return a
+    
+    return fib(a - 1) + fib(a - 2)
+}
+
+extern fn printf(fmt: string, ...values: any)
+
+/***
+0, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 610, 987, 1597, 2584, 4181
+***/

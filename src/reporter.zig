@@ -2,14 +2,17 @@ const std = @import("std");
 const Token = @import("token.zig").Token;
 const TokenSpan = @import("token.zig").TokenSpan;
 const FileManager = @import("file_manager.zig");
+const CompilerOptions = @import("options.zig");
 
 file_manager: *FileManager,
+compiler_options: CompilerOptions,
 
 const Self = @This();
 
-pub fn init(file_manager: *FileManager) Self {
+pub fn init(file_manager: *FileManager, compiler_options: CompilerOptions) Self {
     return .{
         .file_manager = file_manager,
+        .compiler_options = compiler_options,
     };
 }
 
@@ -21,9 +24,13 @@ pub fn reportErrorAtTokenArgs(self: Self, token: Token, comptime msg: []const u8
     std.debug.print(msg, args);
     std.debug.print("\n", .{});
     
-    self.printFileLoc(token.loc.file_id, token.loc.line, token.loc.col);
-    
-    std.debug.panic("", .{});
+    if (self.compiler_options.err_mode != .minimal) {
+        self.printFileLoc(token.loc.file_id, token.loc.line, token.loc.col);
+        std.debug.panic("", .{});
+    }
+    else {
+        std.process.exit(1);
+    }
 }
 
 pub fn reportErrorAfterToken(self: Self, tok: Token, comptime msg: []const u8) noreturn {
@@ -34,9 +41,13 @@ pub fn reportErrorAfterTokenArgs(self: Self, token: Token, comptime msg: []const
     std.debug.print(msg, args);
     std.debug.print("\n", .{});
     
-    self.printFileLoc(token.loc.file_id, token.loc.line, token.loc.col);
-    
-    std.debug.panic("", .{});
+    if (self.compiler_options.err_mode != .minimal) {
+        self.printFileLoc(token.loc.file_id, token.loc.line, token.loc.col);
+        std.debug.panic("", .{});
+    }
+    else {
+        std.process.exit(1);
+    }
 }
 
 pub fn reportErrorAtPos(self: Self, file_id: usize, line: usize, col: usize, index: usize, len: usize, comptime msg: []const u8) noreturn {
@@ -50,9 +61,13 @@ pub fn reportErrorAtPosArgs(self: Self, file_id: usize, line: usize, col: usize,
     std.debug.print(msg, args);
     std.debug.print("\n", .{});
     
-    self.printFileLoc(file_id, line, col);
-    
-    std.debug.panic("", .{});
+    if (self.compiler_options.err_mode != .minimal) {
+        self.printFileLoc(file_id, line, col);
+        std.debug.panic("", .{});
+    }
+    else {
+        std.process.exit(1);
+    }
 }
 
 
@@ -64,9 +79,13 @@ pub fn reportErrorAtSpanArgs(self: Self, span: TokenSpan, comptime msg: []const 
     std.debug.print(msg, args);
     std.debug.print("\n", .{});
     
-    self.printFileLoc(span.file_id, span.line, span.col);
-    
-    std.debug.panic("", .{});
+    if (self.compiler_options.err_mode != .minimal) {
+        self.printFileLoc(span.file_id, span.line, span.col);
+        std.debug.panic("", .{});
+    }
+    else {
+        std.process.exit(1);
+    }
 }
 
 fn printFileLoc(self: Self, file_id: usize, line: usize, col: usize) void {

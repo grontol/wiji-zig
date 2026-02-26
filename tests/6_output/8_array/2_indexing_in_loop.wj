@@ -1,0 +1,26 @@
+fn main() {
+    val a = .[1, 2, 3, 4]
+    
+    for i in 0..4 {
+        printf("a[%d] -> %d\n", i, a[i])
+    }
+    
+    val b = .[10, 20, 30, 40]
+    
+    for i in 0..4 {
+        printf("a[%d] + b[%d] -> %d\n", i, i, a[i] + b[i])
+    }
+}
+
+extern fn printf(fmt: string, ...values: any)
+
+/***
+a[0] -> 1
+a[1] -> 2
+a[2] -> 3
+a[3] -> 4
+a[0] + b[0] -> 11
+a[1] + b[1] -> 22
+a[2] + b[2] -> 33
+a[3] + b[3] -> 44
+***/

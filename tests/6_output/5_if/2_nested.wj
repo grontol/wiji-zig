@@ -1,0 +1,112 @@
+fn main() {
+    {
+        val a = 10
+        val b = 20
+        val c = 4
+
+        if a > 5 {
+            if b < 10 {
+                printf("If if\n")
+                if c > 3 printf("1 c > 3\n")
+            }
+            else {
+                printf("If else\n")
+                if c > 3 printf("2 c > 3\n") 
+            }
+
+            printf("If end\n")
+        }
+        else {
+            printf("Else\n")
+        }
+    }
+    
+    printf("\n", 'a')
+    
+    {
+        val a = 10
+        val b = 2
+        val c = 4
+
+        if a > 5 {
+            if b < 10 {
+                printf("If if\n")
+                if c > 3 printf("1 c > 3\n")
+            }
+            else {
+                printf("If else\n")
+                if c > 3 printf("2 c > 3\n") 
+            }
+
+            printf("If end\n")
+        }
+        else {
+            printf("Else\n")
+        }
+    }
+
+    printf("\n")
+
+    {
+        val a = 10
+        val b = 2
+        val c = 1
+
+        if a > 5 {
+            if b < 10 {
+                printf("If if\n")
+                if c > 3 printf("1 c > 3\n")
+            }
+            else {
+                printf("If else\n")
+                if c > 3 printf("2 c > 3\n") 
+            }
+
+            printf("If end\n")
+        }
+        else {
+            printf("Else\n")
+        }
+    }
+
+    printf("\n")
+
+    {
+        val a = 1
+        val b = 2
+        val c = 1
+
+        if a > 5 {
+            if b < 10 {
+                printf("If if\n")
+                if c > 3 printf("1 c > 3\n")
+            }
+            else {
+                printf("If else\n")
+                if c > 3 printf("2 c > 3\n") 
+            }
+
+            printf("If end\n")
+        }
+        else {
+            printf("Else\n")
+        }
+    }
+}
+
+extern fn printf(fmt: string, ...value: any)
+
+/***
+If else
+2 c > 3
+If end
+
+If if
+1 c > 3
+If end
+
+If if
+If end
+
+Else
+***/

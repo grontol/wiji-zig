@@ -1,0 +1,46 @@
+fn main() {
+    val a = 10
+    val b = 'x'
+    val c = "Satu dia"
+    val d = true
+    val e = false
+    
+    val f = a == 0
+    val g = a < 0
+    val h = a <= 0
+    val i = a > 0
+    val j = a >= 0
+    val k = a == 0
+    val l = a != 0
+    
+    printf("a = %d\n", a)
+    printf("b = %c\n", b)
+    printf("c = %s\n", c)
+    printf("d = %d\n", d)
+    printf("e = %d\n", e)
+    
+    printf("f = %d\n", f)
+    printf("g = %d\n", g)
+    printf("h = %d\n", h)
+    printf("i = %d\n", i)
+    printf("j = %d\n", j)
+    printf("k = %d\n", k)
+    printf("l = %d\n", l)
+}
+
+extern fn printf(fmt: string, ...values: any)
+
+/***
+a = 10
+b = x
+c = Satu dia
+d = 1
+e = 0
+f = 0
+g = 0
+h = 0
+i = 1
+j = 1
+k = 0
+l = 1
+***/

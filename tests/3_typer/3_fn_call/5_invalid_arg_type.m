@@ -1,0 +1,11 @@
+fn main() {
+    foo(10, 10.0, 10, 10)
+}
+
+fn foo(x: i32, y: f32, s: string, c: char) {
+    
+}
+
+/***
+Expected type string but got int
+***/
