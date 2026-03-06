@@ -141,6 +141,7 @@ const Lexer = struct {
         else if (std.mem.eql(u8, text, "struct"))    { self.pushToken(TokenKind.KeywordStruct, start, end); }
         else if (std.mem.eql(u8, text, "interface")) { self.pushToken(TokenKind.KeywordInterface, start, end); }
         else if (std.mem.eql(u8, text, "import"))    { self.pushToken(TokenKind.KeywordImport, start, end); }
+        else if (std.mem.eql(u8, text, "as"))        { self.pushToken(TokenKind.KeywordAs, start, end); }
         else if (std.mem.eql(u8, text, "val"))       { self.pushToken(TokenKind.KeywordVal, start, end); }
         else if (std.mem.eql(u8, text, "var"))       { self.pushToken(TokenKind.KeywordVar, start, end); }
         else if (std.mem.eql(u8, text, "const"))     { self.pushToken(TokenKind.KeywordConst, start, end); }
@@ -148,6 +149,7 @@ const Lexer = struct {
         else if (std.mem.eql(u8, text, "return"))    { self.pushToken(TokenKind.KeywordReturn, start, end); }
         else if (std.mem.eql(u8, text, "true"))      { self.pushToken(TokenKind.TrueLit, start, end); }
         else if (std.mem.eql(u8, text, "false"))     { self.pushToken(TokenKind.FalseLit, start, end); }
+        else if (std.mem.eql(u8, text, "dyn"))       { self.pushToken(TokenKind.KeywordDyn, start, end); }
         else                                         { self.pushToken(TokenKind.Identifier, start, end); }
     }
     
@@ -424,9 +426,7 @@ pub fn tokenize(allocator: std.mem.Allocator, reporter: Reporter, file_id: usize
             
             ':'         => lexer.pushTokenMaybeTwo(':', .Colon, .ColonColon, i),
             '='         => lexer.pushTokenMaybeTwo('=', .Eq, .EqEq, i),
-            '+'         => lexer.pushTokenMaybeTwo('=', .Plus, .PlusEq, i),
             '-'         => lexer.pushTokenMaybeTwo('=', .Minus, .MinusEq, i),
-            '*'         => lexer.pushTokenMaybeTwo('=', .Mul, .MulEq, i),
             '%'         => lexer.pushTokenMaybeTwo('=', .Mod, .ModEq, i),
             '<'         => lexer.pushTokenMaybeTwo('=', .Lt, .Lte, i),
             '>'         => lexer.pushTokenMaybeTwo('=', .Gt, .Gte, i),
@@ -435,6 +435,38 @@ pub fn tokenize(allocator: std.mem.Allocator, reporter: Reporter, file_id: usize
             '&'         => lexer.pushTokenMaybeTwo('&', .And, .AndAnd, i),
             
             '.'         => lexer.pushTokenMaybeThree('.', '.', .Dot, .DotDot, .DotDotDot, i),
+            
+            '+' => {
+                const peek = lexer.chs.peek();
+                
+                if (peek == '=') {
+                    _ = lexer.chs.next();
+                    lexer.pushToken(.PlusEq, i, i + 2);
+                }
+                else if (peek == '+') {
+                    _ = lexer.chs.next();
+                    lexer.pushToken(.PlusPlus, i, i + 2);
+                }
+                else {
+                    lexer.pushToken(.Plus, i, i + 1);
+                }
+            },
+            
+            '*' => {
+                const peek = lexer.chs.peek();
+                
+                if (peek == '=') {
+                    _ = lexer.chs.next();
+                    lexer.pushToken(.MulEq, i, i + 2);
+                }
+                else if (peek == '*') {
+                    _ = lexer.chs.next();
+                    lexer.pushToken(.MulMul, i, i + 2);
+                }
+                else {
+                    lexer.pushToken(.Mul, i, i + 1);
+                }
+            },
             
             else => {
                 reporter.reportErrorAtPosArgs(file_id, lexer.line, lexer.col, i, 1, "Unknown character '{c}'", .{ ch });

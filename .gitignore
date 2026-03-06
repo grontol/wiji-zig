@@ -1,2 +1,4 @@
 .vscode/
 .zig-cache/
+.wiji-out/
+zig-out/

@@ -10,46 +10,26 @@ const tast = @import("tast.zig");
 const typer = @import("typer.zig");
 const SymbolManager = @import("symbol.zig").SymbolManager;
 const TypeManager = @import("type.zig").TypeManager;
+const cgen = @import("cgen.zig");
+const Driver = @import("driver.zig").Driver;
 
 pub fn main() !void {
-    var args = std.process.args();
+    var args = std.process.args();    
     const options = CompilerOptions.parse(&args);
     
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
     
-    var file_manager = FileManager.init(allocator);
-    
-    const file_index = file_manager.loadContent(options.entry_file);
-    const src = file_manager.getContent(file_index);
-    
-    const reporter = Reporter.init(&file_manager, options);
-    
-    const tokens = try lexer.tokenize(allocator, reporter, file_index, src);
-    
-    if (options.emit_token) {
-        for (tokens) |token| {
-            std.debug.print("- ", .{});
-            token.print(&file_manager);
-        }
-        
-        return;
-    }
-    
-    const ast_module = parser.parse(allocator, reporter, tokens);
-    
-    if (options.emit_ast) {
-        var ast_printer: ast.Printer = .{ .file_manager = &file_manager };
-        ast_printer.printModule(&ast_module);
-        
-        return;
-    }
-    
-    var symbol_manager = SymbolManager.init(allocator);
-    
-    if (options.emit_tast) {
-        const tast_module = typer.typecheck(allocator, reporter, &file_manager, &symbol_manager, &ast_module);
-        var tast_printer = tast.Printer.init(allocator);
-        tast_printer.printModule(&tast_module);
-    }
+    var driver = Driver.init(allocator, options);
+    try driver.run();
 }
+
+// pub fn panic(msg: []const u8, stack_trace: ?*std.builtin.StackTrace, addr: ?usize) noreturn {
+//     std.debug.print("PANIC {s}\n", .{msg});
+//     _ = stack_trace;
+//     _ = addr;
+    
+//     // std.debug.defaultPanic(msg, addr);
+    
+//     std.process.exit(1);
+// }

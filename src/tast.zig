@@ -1,10 +1,16 @@
 const std = @import("std");
 const types = @import("type.zig");
 const Symbol = @import("symbol.zig").Symbol;
+const TypedSymbol = @import("symbol.zig").TypedSymbol;
 const Type = types.Type;
 
 pub const Module = struct {
+    id: usize,
+    var_decls: []const VarDecl,
     fn_decls: []const FnDecl,
+    
+    public_symbols: std.StringHashMap(TypedSymbol),
+    children: []const *Module,
 };
 
 pub const Block = struct {
@@ -16,7 +22,14 @@ pub const BlockExpr = struct {
     last_expr: *Expr,
 };
 
+pub const VarDeclKind = enum {
+    Val,
+    Var,
+    Const,
+};
+
 pub const VarDecl = struct {
+    kind: VarDeclKind,
     name: Symbol,
     value: ?*Expr,
     typ: *const Type,
@@ -45,6 +58,8 @@ pub const FnParam = struct {
 
 pub const FnDecl = struct {
     is_extern: bool,
+    extern_name: ?[]const u8,
+    extern_abi: ?[]const u8,
     is_public: bool,
     name: Symbol,
     params: []const FnParam,
@@ -71,12 +86,42 @@ pub const IfExpr = struct {
     false_expr: *Expr,
 };
 
+pub const While = struct {
+    condition: *Expr,
+    body: *Stmt,
+};
+
+pub const ForRange = struct {
+    item_var: ?Symbol,
+    start: *Expr,
+    end: *Expr,
+    body: *Stmt,
+};
+
+pub const ForEach = struct {
+    item_var: ?Symbol,
+    item_typ: ?*const Type,
+    index_var: ?Symbol,
+    iter: *Expr,
+    body: *Stmt,
+};
+
 pub const Return = struct {
     value: ?*Expr,
 };
 
 pub const Identifier = struct {
     name: Symbol,
+};
+
+pub const UnaryOp = enum {
+    not,
+    minus,
+};
+
+pub const Unary = struct {
+    expr: *Expr,
+    op: UnaryOp,
 };
 
 pub const Binop = enum {
@@ -91,12 +136,40 @@ pub const Binop = enum {
     lte,
     eq_eq,
     not_eq,
+    or_,
+    or_or,
+    and_,
+    and_and,
 };
 
 pub const Binary = struct {
     lhs: *Expr,
     rhs: *Expr,
     op: Binop,
+};
+
+pub const Range = struct {
+    lhs: *Expr,
+    rhs: *Expr,
+    is_eq: bool,
+};
+
+pub const ArrayValue = struct {
+    elems: []const Expr,
+};
+
+pub const ArrayIndex = struct {
+    callee: *Expr,
+    index: *Expr,
+};
+
+pub const StructValue = struct {
+    values: []const Expr,
+};
+
+pub const StructMember = struct {
+    callee: *Expr,
+    member_index: usize,
 };
 
 pub const LiteralKind = enum {
@@ -120,6 +193,16 @@ pub const Cast = struct {
     typ: *const Type,
 };
 
+pub const BuiltinKind = enum {
+    array_len,
+    dynarray_append,
+};
+
+pub const Builtin = union(BuiltinKind) {
+    array_len: struct { arr: *Expr },
+    dynarray_append: struct { arr: *Expr },
+};
+
 pub const StmtKind = enum {
     module,
     block,
@@ -128,9 +211,11 @@ pub const StmtKind = enum {
     fn_call,
     iff,
     for_range,
+    for_each,
     whil,
     returns,
     expr,
+    noop,
 };
 
 pub const Stmt = union(StmtKind) {
@@ -140,10 +225,12 @@ pub const Stmt = union(StmtKind) {
     assignment: Assignment,
     fn_call: FnCall,
     iff: If,
-    for_range,
-    whil,
+    for_range: ForRange,
+    for_each: ForEach,
+    whil: While,
     returns: Return,
     expr: Expr,
+    noop,
     
     pub fn canBeUsedAsExpr(self: *const Stmt) bool {
         switch (self.*) {
@@ -172,6 +259,7 @@ pub const Stmt = union(StmtKind) {
 pub const ExprKind = enum {
     identifier,
     literal,
+    unary,
     binary,
     fn_call,
     range,
@@ -182,22 +270,25 @@ pub const ExprKind = enum {
     cast,
     iff,
     block,
+    builtin,
 };
 
 pub const Expr = struct {
     value: union(ExprKind) {
         identifier: Identifier,
         literal: Literal,
+        unary: Unary,
         binary: Binary,
         fn_call: FnCall,
-        range,
-        array_value,
-        array_index,
-        struct_value,
-        struct_member,
+        range: Range,
+        array_value: ArrayValue,
+        array_index: ArrayIndex,
+        struct_value: StructValue,
+        struct_member: StructMember,
         cast: Cast,
         iff: IfExpr,
         block: BlockExpr,
+        builtin: Builtin,
     },
     typ: *const Type,
 };

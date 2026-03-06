@@ -1,8 +1,14 @@
 const std = @import("std");
+const Type = @import("type.zig").Type;
 
 pub const Symbol = struct {
     id: usize,
     text: []const u8,
+};
+
+pub const TypedSymbol = struct {
+    symbol: Symbol,
+    typ: *const Type,
 };
 
 pub const SymbolManager = struct {

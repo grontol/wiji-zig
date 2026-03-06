@@ -1,0 +1,18 @@
+import "std.wj"
+import "raylib.wj"
+
+fn main() {
+    printf("FOOO\n")
+    
+    setTargetFPS(60)
+    initWindow(800, 600, "Jojo Mama")
+    
+    while !windowShouldClose() {
+        beginDrawing()
+        clearBackground(GRAY)
+        
+        endDrawing()
+    }
+    
+    closeWindow()
+}

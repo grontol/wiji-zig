@@ -1,0 +1,1 @@
+extern pub fn printf(fmt: string, ...args: any)

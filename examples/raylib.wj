@@ -1,0 +1,27 @@
+struct Color { r: u8, g: u8, b: u8, a: u8 }
+
+const RED  = Color.{255, 0, 0, 255}
+const GRAY = Color.{50, 50, 50, 255}
+
+const MOUSE_BUTTON_LEFT    = 0
+const MOUSE_BUTTON_RIGHT   = 1
+const MOUSE_BUTTON_MIDDLE  = 2
+const MOUSE_BUTTON_SIDE    = 3
+const MOUSE_BUTTON_EXTRA   = 4
+const MOUSE_BUTTON_FORWARD = 5
+const MOUSE_BUTTON_BACK    = 6
+
+extern(name = "InitWindow")           fn initWindow(width: i32, height: i32, title: string)
+extern(name = "CloseWindow")          fn closeWindow()
+extern(name = "WindowShouldClose")    fn windowShouldClose(): bool
+extern(name = "BeginDrawing")         fn beginDrawing()
+extern(name = "EndDrawing")           fn endDrawing()
+extern(name = "ClearBackground")      fn clearBackground(color: Color)
+extern(name = "DrawRectangle")        fn drawRectangle(x: i32, y: i32, w: i32, h: i32, color: Color)
+extern(name = "IsKeyPressed")         fn isKeyPressed(key: i32): bool
+extern(name = "IsMouseButtonPressed") fn isMouseButtonPressed(button: i32): bool
+extern(name = "GetMouseX")            fn getMouseX(): i32
+extern(name = "GetMouseY")            fn getMouseY(): i32
+extern(name = "SetTargetFPS")         fn setTargetFPS(fps: i32)
+extern(name = "DrawFPS")              fn drawFPS(x: i32, y: i32)
+extern(name = "GetFrameTime")         fn getFrameTime(): f32

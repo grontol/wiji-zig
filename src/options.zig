@@ -9,6 +9,8 @@ entry_file: []const u8,
 emit_token: bool = false,
 emit_ast: bool = false,
 emit_tast: bool = false,
+emit_c: bool = false,
+run: bool = false,
 err_mode: ErrMode = .normal,
 
 const CompilerOptions = @This();
@@ -22,7 +24,10 @@ pub fn parse(args: *std.process.ArgIterator) CompilerOptions {
     };
     
     while (args.next()) |arg| {
-        if (std.mem.eql(u8, arg, "--emit")) {
+        if (std.mem.eql(u8, arg, "--run")) {
+            opt.run = true;
+        }
+        else if (std.mem.eql(u8, arg, "--emit")) {
             if (args.next()) |sub_arg| {
                 if (std.mem.eql(u8, sub_arg, "token")) {
                     opt.emit_token = true;
@@ -32,6 +37,9 @@ pub fn parse(args: *std.process.ArgIterator) CompilerOptions {
                 }
                 else if (std.mem.eql(u8, sub_arg, "tast")) {
                     opt.emit_tast = true;
+                }
+                else if (std.mem.eql(u8, sub_arg, "c")) {
+                    opt.emit_c = true;
                 }
                 else {
                     showUsage(program_name, "Invalid --emit argument");

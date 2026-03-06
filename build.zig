@@ -1,12 +1,16 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
+    const use_llvm = b.option(bool, "use_llvm", "Use LLVM") orelse false;
+    
     const optimize = b.standardOptimizeOption(.{
         .preferred_optimize_mode = .Debug,
     });
     
     const exe = b.addExecutable(.{
         .name = "wijic",
+        .use_llvm = use_llvm,
+        .use_lld = use_llvm,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = b.graph.host,

@@ -4,6 +4,7 @@ const TokenSpan = @import("token.zig").TokenSpan;
 const FileManager = @import("file_manager.zig");
 
 pub const Module = struct {
+    imports: []const Import,
     exprs: []const Expr,
 };
 
@@ -49,6 +50,7 @@ pub const StructValue = struct {
 };
 
 pub const VarDecl = struct {
+    is_public: bool,
     decl: Token,
     name: Token,
     typ: ?Type,
@@ -57,6 +59,8 @@ pub const VarDecl = struct {
 
 pub const FnDecl = struct {
     is_extern: bool,
+    extern_name: ?[]const u8,
+    extern_abi: ?[]const u8,
     is_public: bool,
     
     name: Token,
@@ -83,6 +87,11 @@ pub const StructField = struct {
     name: Token,
     typ: ?Type,
     default_value: ?*Expr,
+};
+
+pub const Unary = struct {
+    expr: *Expr,
+    op: Token,
 };
 
 pub const Binary = struct {
@@ -144,9 +153,22 @@ pub const Assignment = struct {
     op: Token,
 };
 
-pub const Intrinsic = struct {};
 pub const Return = struct {
     value: ?*Expr,
+};
+
+pub const Intrinsic = struct {};
+
+pub const Import = struct {
+    path: Token,
+    symbols: ?[]const Token,
+    as: ?Token,
+};
+
+pub const Extern = struct {
+    name: ?Token,
+    abi: ?Token,
+    span: TokenSpan,
 };
 
 pub const LitKind = enum {
@@ -172,6 +194,7 @@ pub const Kind = enum {
     fn_decl,
     struct_decl,
     
+    unary,
     binary,
     fn_call,
     member_access,
@@ -183,8 +206,9 @@ pub const Kind = enum {
     iff,
     
     assignment,
-    intrinsic,
     returns,
+    intrinsic,
+    import,
 };
 
 pub const Expr = struct {
@@ -200,6 +224,7 @@ pub const Expr = struct {
         fn_decl: FnDecl,
         struct_decl: StructDecl,
         
+        unary: Unary,
         binary: Binary,
         fn_call: FnCall,
         member_access: MemberAccess,
@@ -211,8 +236,9 @@ pub const Expr = struct {
         iff: If,
         
         assignment: Assignment,
-        intrinsic: Intrinsic,
         returns: Return,
+        intrinsic: Intrinsic,
+        import: Import,
     },
     
     pub fn canBeUsedAsExpr(self: *const Expr) bool {
@@ -261,6 +287,7 @@ pub const Type = struct {
         },
         array: struct {
             child: *Type,
+            is_dyn: bool,
         },
         reference: struct {
             child: *Type,

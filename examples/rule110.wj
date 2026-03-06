@@ -1,0 +1,38 @@
+import "std.wj"
+
+val blocks = .[0] ** 19 ++ .[1]
+val bck_blocks = .[0] ** 20
+val tbl = .[0, 1, 1, 0, 1, 1, 1, 0]
+
+fn main() {    
+    printBlock()
+    
+    for blocks.len - 1 {
+        for i in blocks.len {
+            var l: i32
+            var m: i32
+            var r: i32
+            
+            if i > 0 l = blocks[i - 1] else l = 0
+            m = blocks[i]
+            if i < blocks.len - 1 r = blocks[i + 1] else r = 0
+            
+            bck_blocks[i] = tbl[l * 4 + m * 2 + r]
+        }
+        
+        for i in blocks.len {
+            blocks[i] = bck_blocks[i]
+        }
+        
+        printBlock()
+    }
+}
+
+fn printBlock() {
+    for b in blocks {
+        if b == 1 printf("*")
+        else printf(" ")
+    }
+    
+    printf("\n")
+}

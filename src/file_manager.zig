@@ -1,4 +1,5 @@
 const std = @import("std");
+const Token = @import("token.zig").Token;
 
 allocator: std.mem.Allocator,
 file_index_map: std.StringHashMap(usize),
@@ -24,6 +25,11 @@ pub fn getFilename(self: *const Self, index: usize) []const u8 {
     return self.filename_list.items[index];
 }
 
+pub fn getTokenText(self: *const Self, token: Token) []const u8 {
+    const src = self.getContent(token.loc.file_id);
+    return src[token.loc.index..token.loc.index + token.loc.len];
+}
+
 pub fn loadContent(self: *Self, filename: []const u8) usize {
     if (self.file_index_map.get(filename)) |index| {
         return index;
@@ -31,7 +37,13 @@ pub fn loadContent(self: *Self, filename: []const u8) usize {
     
     const cwd = std.fs.cwd();
     
-    const file = cwd.openFile(filename, .{}) catch unreachable;
+    const file = cwd.openFile(filename, .{}) catch |err| switch (err) {
+        error.FileNotFound => {
+            std.debug.print("Cannot open file: {s}. File not found\n", .{filename});
+            std.process.exit(1);
+        },
+        else => unreachable,
+    };
     defer file.close();
     
     const stat = file.stat() catch unreachable;

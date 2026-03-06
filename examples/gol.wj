@@ -1,0 +1,111 @@
+import "raylib.wj"
+
+const SCREEN_WIDTH  = 400
+const SCREEN_HEIGHT = 600
+
+const BLOCK_SIZE = 20
+const BLOCK_PADDING = 2
+const COL = SCREEN_WIDTH / BLOCK_SIZE
+const ROW = SCREEN_HEIGHT / BLOCK_SIZE
+const SPEED = 5.0
+
+val grid = .[0] ** 600
+val back = .[0] ** 600
+
+fn main() {
+    grid[3 + 1 * COL] = 1
+    grid[1 + 2 * COL] = 1
+    grid[3 + 2 * COL] = 1
+    grid[2 + 3 * COL] = 1
+    grid[3 + 3 * COL] = 1
+    
+    var frame_time = 0.0
+    
+    setTargetFPS(60)
+    initWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Hello Guys")
+    
+    while !windowShouldClose() {
+        beginDrawing()
+        clearBackground(GRAY)
+        
+        frame_time += getFrameTime()
+        const delays = 1 / SPEED
+        
+        if frame_time >= delays {
+            frame_time -= delays
+            update()
+        }
+        
+        draw()
+        
+        endDrawing()
+    }
+    
+    closeWindow()
+}
+
+
+fn update() {
+    for r in ROW {
+        for c in COL {
+            val tl = get(r - 1, c - 1)
+            val t  = get(r - 1, c)
+            val tr = get(r - 1, c + 1)
+            
+            val ll = get(r, c - 1)
+            val rr = get(r, c + 1)
+            
+            val bl = get(r + 1, c - 1)
+            val b  = get(r + 1, c)
+            val br = get(r + 1, c + 1)
+            
+            val nbors = tl + t + tr + ll + rr + bl + b + br
+            val index = r * COL + c
+            
+            if (nbors < 2) || (nbors > 3)
+                back[index] = 0
+            else if nbors == 3
+                back[index] = 1
+            else
+                back[index] = grid[index]
+        }
+    }
+    
+    for r in ROW {
+        for c in COL {
+            val index = r * COL + c
+            grid[index] = back[index]
+        }
+    }
+}
+
+fn draw() {    
+    for r in ROW {
+        for c in COL {
+            if grid[r * COL + c] == 1 {
+                drawRectangle(
+                    c * BLOCK_SIZE + 1,
+                    r * BLOCK_SIZE + 1,
+                    BLOCK_SIZE - 2,
+                    BLOCK_SIZE - 2,
+                    RED,
+                )
+            }
+        }
+    }
+}
+
+fn reset() {
+    for r in ROW {
+        for c in COL {
+            grid[r * COL + c] = 0
+        }
+    }
+}
+
+fn get(r: i32, c: i32): i32 {
+    val rr = (r + ROW) % ROW
+    val cc = (c + COL) % COL
+    
+    return grid[rr * COL + cc]
+}

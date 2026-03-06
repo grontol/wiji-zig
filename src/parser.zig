@@ -2,6 +2,7 @@ const std = @import("std");
 const Token = @import("token.zig").Token;
 const TokenSpan = @import("token.zig").TokenSpan;
 const TokenKind = @import("token.zig").TokenKind;
+const FileManager = @import("file_manager.zig");
 const Reporter = @import("reporter.zig");
 const ast = @import("ast.zig");
 
@@ -20,6 +21,9 @@ const precedence_map = blk: {
     res.put(.Mod, 12);
     res.put(.Mul, 12);
     res.put(.Div, 12);
+    
+    res.put(.PlusPlus, 100);
+    res.put(.MulMul, 101);
     
     break :blk res;
 };
@@ -130,13 +134,23 @@ const TokenStream = struct {
 const Parser = struct {
     allocator: std.mem.Allocator,
     temp_allocator: std.mem.Allocator,
+    file_manager: *const FileManager,
     reporter: Reporter,
     ts: TokenStream,
     
-    fn init(allocator: std.mem.Allocator, temp_allocator: std.mem.Allocator, reporter: Reporter, tokens: []const Token) Parser {
+    imports: std.ArrayList(ast.Import) = .empty,
+    
+    fn init(
+        allocator: std.mem.Allocator,
+        temp_allocator: std.mem.Allocator,
+        file_manager: *const FileManager,
+        reporter: Reporter,
+        tokens: []const Token,
+    ) Parser {
         return .{
             .allocator = allocator,
             .temp_allocator = temp_allocator,
+            .file_manager = file_manager,
             .reporter = reporter,
             .ts = TokenStream.init(reporter, tokens),
         };
@@ -151,6 +165,28 @@ const Parser = struct {
                 TokenKind.KeywordExtern,
                 TokenKind.KeywordPub => _ = self.ts.next(),
                 TokenKind.KeywordFn => {
+                    res = true;
+                    break;
+                },
+                else => break,
+            }
+        }
+        
+        self.ts.restore();
+        
+        return res;
+    }
+    
+    fn hasVarDeclNext(self: *Parser) bool {
+        var res = false;
+        self.ts.mark();
+        
+        while (self.ts.hasNext()) {
+            switch (self.ts.peek().kind) {
+                TokenKind.KeywordPub => _ = self.ts.next(),
+                TokenKind.KeywordVal,
+                TokenKind.KeywordVar,
+                TokenKind.KeywordConst => {
                     res = true;
                     break;
                 },
@@ -190,6 +226,7 @@ const Parser = struct {
         
         return .{
             .exprs = self.collectAndFreeTempList(ast.Expr, &exprs),
+            .imports = self.imports.items,
         };
     }
     
@@ -201,11 +238,11 @@ const Parser = struct {
             const rhs = self.parseExpr();
             
             expr = ast.Expr{
-                .value = .{ .assignment = .{
+                .value = .{.assignment = .{
                     .lhs = self.makeExprPointer(expr),
                     .rhs = self.makeExprPointer(rhs),
                     .op = op_token,
-                } },
+                }},
                 .span = TokenSpan.from_spans(expr.span, rhs.span),
             };
         }
@@ -328,11 +365,14 @@ const Parser = struct {
                 }
             },
             
-            TokenKind.KeywordFn => expr = self.parseFnDecl(),
+            TokenKind.KeywordFn => expr = self.parseFnDecl(null),
             TokenKind.KeywordStruct => expr = self.parseStructDecl(),
             TokenKind.KeywordPub => {
                 if (self.hasFnNext()) {
-                    expr = self.parseFnDecl();
+                    expr = self.parseFnDecl(null);
+                }
+                else if (self.hasVarDeclNext()) {
+                    expr = self.parseVarDecl();
                 }
                 else if (self.hasStructNext()) {
                     expr = self.parseStructDecl();
@@ -342,11 +382,14 @@ const Parser = struct {
                 }
             },
             TokenKind.KeywordExtern => {
+                const extern_token = self.ts.peek();
+                const extern_ = self.parseExtern();
+                
                 if (self.hasFnNext()) {
-                    expr = self.parseFnDecl();
+                    expr = self.parseFnDecl(extern_);
                 }
                 else {
-                    self.reporter.reportErrorAtToken(self.ts.peekN(1), "Invalid extern modifier");
+                    self.reporter.reportErrorAtToken(extern_token, "extern modifier can only be applied to function");
                 }
             },
             TokenKind.KeywordFor => expr = self.parseFor(),
@@ -377,6 +420,9 @@ const Parser = struct {
             },
             TokenKind.At => std.debug.panic("TODO: Parse intrinsic", .{}),
             TokenKind.KeywordReturn => { expr = self.parseReturn(); },
+            TokenKind.Not,
+            TokenKind.Minus => { expr = self.parseUnary(); },
+            TokenKind.KeywordImport => { expr = self.parseImport(); },
             
             else => {
                 std.debug.panic("Not Implemented : parsePrimaryExpr {s}", .{@tagName(kind)});
@@ -386,12 +432,23 @@ const Parser = struct {
         return expr;
     }
     
-    fn parseFnDecl(self: *Parser) ast.Expr {
-        var extern_token: ?Token = null;
+    fn parseFnDecl(self: *Parser, extern_: ?ast.Extern) ast.Expr {
+        var extern_name: ?[]const u8 = null;
+        var extern_abi: ?[]const u8 = null;        
         var public_token: ?Token = null;
         
-        if (self.ts.peek().kind == .KeywordExtern) {
-            extern_token = self.ts.next();
+        if (extern_) |ext| {
+            if (ext.name) |name| {
+                const name_text = self.getTokenText(name);
+                const name_without_quote = name_text[1..name_text.len - 1];
+                extern_name = self.allocator.dupe(u8, name_without_quote) catch unreachable;
+            }
+            
+            if (ext.abi) |abi| {
+                const abi_text = self.getTokenText(abi);
+                const abi_without_quote = abi_text[1..abi_text.len - 1];
+                extern_abi = self.allocator.dupe(u8, abi_without_quote) catch unreachable;
+            }
         }
         
         if (self.ts.peek().kind == .KeywordPub) {
@@ -464,15 +521,23 @@ const Parser = struct {
             body = self.parseBlock();
         }
         
-        const start_token = extern_token orelse public_token orelse fn_token;
+        const start_token = public_token orelse fn_token;
         
-        const span = if (body) |b| TokenSpan.from_token_and_span(start_token, b.span)
-        else TokenSpan.from_tokens(start_token, close_paren_token);
+        const span = if (extern_) |ext| blk: {
+            break :blk if (body) |b| TokenSpan.from_spans(ext.span, b.span)
+            else TokenSpan.from_span_and_token(ext.span, close_paren_token);
+        }
+        else blk: {
+            break :blk if (body) |b| TokenSpan.from_token_and_span(start_token, b.span)
+            else TokenSpan.from_tokens(start_token, close_paren_token);
+        };
         
         return ast.Expr{
             .value = .{
                 .fn_decl = .{
-                    .is_extern = extern_token != null,
+                    .is_extern = extern_ != null,
+                    .extern_name = extern_name,
+                    .extern_abi = extern_abi,
                     .is_public = public_token != null,
                     .name = name_token,
                     .params = self.collectAndFreeTempList(ast.FnParam, &params),
@@ -601,6 +666,12 @@ const Parser = struct {
     }
     
     fn parseVarDecl(self: *Parser) ast.Expr {
+        var pub_token: ?Token = null;
+        
+        if (self.ts.peek().kind == .KeywordPub) {
+            pub_token = self.ts.next();
+        }
+        
         const decl_token = self.ts.nextExpectAny(&[_]TokenKind{ .KeywordVal, .KeywordVar, .KeywordConst });
         const name_token = self.ts.nextExpect(.Identifier);
         var typ: ?ast.Type = null;
@@ -622,12 +693,13 @@ const Parser = struct {
         
         return .{
             .value = .{ .var_decl = .{
+                .is_public = pub_token != null,
                 .decl = decl_token,
                 .name = name_token,
                 .typ = typ,
                 .value = value,
             } },
-            .span = TokenSpan.from_tokens(decl_token, decl_token),
+            .span = TokenSpan.from_tokens(pub_token orelse decl_token, decl_token),
         };
     }
     
@@ -688,8 +760,19 @@ const Parser = struct {
         };
     }
     
-    fn parseWhile(_: *Parser) ast.Expr {
-        std.debug.panic("TODO: parseWhile", .{});
+    fn parseWhile(self: *Parser) ast.Expr {
+        const while_token = self.ts.nextExpect(.KeywordWhile);
+        
+        const cond = self.makeExprPointer(self.parseExpr());
+        const body = self.makeExprPointer(self.parseExpr());
+        
+        return .{
+            .span = TokenSpan.from_token_and_span(while_token, body.span),
+            .value = .{.whil = .{
+                .condition = cond,
+                .body = body
+            }},
+        };
     }
     
     fn parseIf(self: *Parser) ast.Expr {
@@ -710,6 +793,27 @@ const Parser = struct {
                 .else_expr = else_expr
             }},
             .span = TokenSpan.from_token_and_span(if_token, if (else_expr) |e| e.span else body.span),
+        };
+    }
+    
+    fn parseUnary(self: *Parser) ast.Expr {
+        const op = self.ts.next();
+        
+        switch (op.kind) {
+            .Not,
+            .Minus => {},
+            
+            else => { std.debug.panic("Invalid unary operator {s}", .{@tagName(op.kind)}); },
+        }
+        
+        const expr = self.makeExprPointer(self.parseExpr());
+        
+        return .{
+            .span = TokenSpan.from_token_and_span(op, expr.span),
+            .value = .{.unary = .{
+                .expr = expr,
+                .op = op,
+            }},
         };
     }
     
@@ -890,6 +994,57 @@ const Parser = struct {
         };
     }
     
+    fn parseExtern(self: *Parser) ast.Extern {
+        const extern_token = self.ts.nextExpect(.KeywordExtern);
+        var close_token: ?Token = null;
+        
+        var name: ?Token = null;
+        var abi: ?Token = null;
+        
+        if (self.ts.peek().kind == .OpenParen) {
+            _ = self.ts.next();
+            
+            var has_comma = true;
+            
+            while (self.ts.hasNext()) {
+                if (self.ts.peek().kind == .CloseParen) {
+                    close_token = self.ts.next();
+                    break;
+                }
+                
+                if (!has_comma) {
+                    self.reporter.reportErrorAfterToken(self.ts.current(), "Expected comma");
+                }
+                
+                const ident = self.ts.nextExpect(.Identifier);
+                const text = self.getTokenText(ident);
+                
+                if (std.mem.eql(u8, text, "name")) {
+                    _ = self.ts.nextExpect(.Eq);
+                    name = self.ts.nextExpect(.StringLit);
+                }
+                else if (std.mem.eql(u8, text, "abi")) {
+                    _ = self.ts.nextExpect(.Eq);
+                    abi = self.ts.nextExpect(.StringLit);
+                }
+                
+                if (self.ts.peek().kind == .Comma) {
+                    _ = self.ts.next();
+                    has_comma = true;
+                }
+                else {
+                    has_comma = false;
+                }
+            }
+        }
+        
+        return .{
+            .name = name,
+            .abi = abi,
+            .span = TokenSpan.from_tokens(extern_token, close_token orelse extern_token),
+        };
+    }
+    
     fn parseType(self: *Parser) ast.Type {
         var typ: ast.Type = undefined;
         
@@ -949,6 +1104,12 @@ const Parser = struct {
             },
             TokenKind.OpenSqBracket => {
                 const open_sq_token = self.ts.next();
+                
+                const is_dyn = if (self.ts.peek().kind == .KeywordDyn) blk: {
+                    _ = self.ts.next();
+                    break :blk true;
+                } else false;
+                
                 _ = self.ts.nextExpect(.CloseSqBracket);
                 
                 const child: *ast.Type = self.makeTypePointer(self.parseType());
@@ -957,6 +1118,7 @@ const Parser = struct {
                     .value = .{
                         .array = .{
                             .child = child,
+                            .is_dyn = is_dyn,
                         },
                     },
                     .span = TokenSpan.from_token_and_span(open_sq_token, child.span),
@@ -1050,6 +1212,59 @@ const Parser = struct {
         return typ;
     }
     
+    fn parseImport(self: *Parser) ast.Expr {
+        const import_token = self.ts.nextExpect(.KeywordImport);
+        const path = self.ts.nextExpect(.StringLit);
+        
+        var symbols: ?[]const Token = null;
+        var close_bracket_token: ?Token = null;
+        var as: ?Token = null;
+        
+        if (self.ts.peek().kind == .OpenCurlyBracket) {
+            _ = self.ts.next();
+            var tokens = std.ArrayList(Token).empty;
+            var has_comma = true;
+            
+            while (self.ts.peek().kind != .CloseCurlyBracket) {
+                if (!has_comma) {
+                    self.reporter.reportErrorAtToken(self.ts.current(), "Expected comma");
+                }
+                
+                tokens.append(self.temp_allocator, self.ts.nextExpect(.Identifier)) catch unreachable;
+                
+                if (self.ts.peek().kind == .Comma) {
+                    _ = self.ts.next();
+                    has_comma = true;
+                }
+                else {
+                    has_comma = false;
+                }
+            }
+            
+            close_bracket_token = self.ts.nextExpect(.CloseCurlyBracket);
+            
+            symbols = self.collectAndFreeTempList(Token, &tokens);
+        }
+        
+        if (self.ts.peek().kind == .KeywordAs) {
+            _ = self.ts.next();
+            as = self.ts.nextExpect(.Identifier);
+        }
+        
+        const import: ast.Import = .{
+            .path = path,
+            .symbols = symbols,
+            .as = as,
+        };
+        
+        self.imports.append(self.allocator, import) catch unreachable;
+        
+        return .{
+            .span = TokenSpan.from_tokens(import_token, as orelse close_bracket_token orelse path),
+            .value = .{.import = import},
+        };
+    }
+    
     fn makeExprPointer(self: *Parser, expr: ast.Expr) *ast.Expr {
         const p = self.allocator.create(ast.Expr) catch unreachable;
         p.* = expr;
@@ -1070,13 +1285,18 @@ const Parser = struct {
         
         return res;
     }
+    
+    fn getTokenText(self: *Parser, token: Token) []const u8 {
+        const src = self.file_manager.getContent(token.loc.file_id);
+        return src[token.loc.index..token.loc.index + token.loc.len];
+    }
 };
 
-pub fn parse(allocator: std.mem.Allocator, reporter: Reporter, tokens: []const Token) ast.Module {
+pub fn parse(allocator: std.mem.Allocator, file_manager: *const FileManager, reporter: Reporter, tokens: []const Token) ast.Module {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const temp_allocator = gpa.allocator();
     defer std.debug.assert(gpa.deinit() == .ok);
     
-    var parser = Parser.init(allocator, temp_allocator, reporter, tokens);
+    var parser = Parser.init(allocator, temp_allocator, file_manager, reporter, tokens);
     return parser.parseModule();
 }

@@ -1,0 +1,35 @@
+import "raylib.wj"
+
+const SCREEN_WIDTH  = 800
+const SCREEN_HEIGHT = 600
+
+struct Box {
+    x: i32
+    y: i32
+}
+
+fn main() {
+    val boxes: [dyn]Box = .[.{100, 100}]
+    
+    setTargetFPS(60)
+    initWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Clicker")
+    
+    while !windowShouldClose() {
+        if isMouseButtonPressed(MOUSE_BUTTON_LEFT) {
+            boxes.append(.{getMouseX(), getMouseY()})
+        }
+        
+        beginDrawing()
+        clearBackground(GRAY)
+        
+        for b in boxes {
+            drawRectangle(b.x, b.y, 30, 30, RED)
+        }
+        
+        drawFPS(20, 20)
+        
+        endDrawing()
+    }
+    
+    closeWindow()
+}
