@@ -13,9 +13,9 @@ fn main() {
     
     for size - 1 {
         for i in size {
-            val l: i32
-            val m: i32
-            val r: i32
+            var l: i32
+            var m: i32
+            var r: i32
             
             if i > 0 l = arr[i - 1] else l = 0
             m = arr[i]

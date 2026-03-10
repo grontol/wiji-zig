@@ -5,5 +5,5 @@ fn main() {
 }
 
 /***
-Type string cannot be used as condition
+Type `string` cannot be used as condition
 ***/

@@ -7,5 +7,5 @@ fn foo(x: i32, y: f32, s: string, c: char) {
 }
 
 /***
-Expected type string but got int
+Expected type `string` but got `int`
 ***/

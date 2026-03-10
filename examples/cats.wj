@@ -1,0 +1,68 @@
+import "raylib.wj"
+
+const SCREEN_WIDTH  = 1280
+const SCREEN_HEIGHT = 720
+
+var textCat: Texture
+
+struct Cat {
+    x: i32
+    y: i32
+    
+    dx = 2,
+    dy = 2,
+    
+    fn update(self: &Cat) {
+        self.x += self.dx
+        self.y += self.dy
+        
+        if self.x < 0 {
+            self.x = 0
+            self.dx *= -1
+        }
+        else if self.x + textCat.width > SCREEN_WIDTH {
+            self.x = SCREEN_WIDTH - textCat.width
+            self.dx *= -1
+        }
+        
+        if self.y < 0 {
+            self.y = 0
+            self.dy *= -1
+        }
+        else if self.y + textCat.height > SCREEN_HEIGHT {
+            self.y = SCREEN_HEIGHT - textCat.height
+            self.dy *= -1
+        }
+    }
+    
+    fn draw(self: &Cat) {
+        drawTexture(textCat, self.x, self.y, WHITE)
+    }
+}
+
+fn main() {
+    setTargetFPS(60)
+    initWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Battle")
+    
+    textCat = loadTexture("examples/assets/cat.jpeg")
+    val cats: [dyn]Cat = .[.{0, 0}]
+    
+    while !windowShouldClose() {
+        if isMouseButtonPressed(MOUSE_BUTTON_LEFT) {
+            cats.append(.{getMouseX(), getMouseY()})
+        }
+        
+        beginDrawing()
+        clearBackground(GRAY)
+        
+        for &cat in cats {
+            cat.update()
+            cat.draw()
+        }
+        
+        drawFPS(20, 20)
+        endDrawing()
+    }
+    
+    closeWindow()
+}

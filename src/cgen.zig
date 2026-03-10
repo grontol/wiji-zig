@@ -4,6 +4,7 @@ const tast = @import("tast.zig");
 const types = @import("type.zig");
 const Type = types.Type;
 const TypeId = types.TypeId;
+const Symbol = @import("symbol.zig").Symbol;
 
 const macros =
 \\#define DYN_ARRAY_APPEND(typ, arr, value) do {                                \
@@ -91,6 +92,14 @@ const Cgen = struct {
     
     inline fn writeArgs(self: *Cgen, comptime fmt: []const u8, args: anytype) void {
         self.cur_src.print(self.allocator, fmt, args) catch unreachable;
+    }
+    
+    fn writeSymbol(self: *Cgen, symbol: Symbol) void {
+        for (symbol.namespaces) |namespace| {
+            self.writeArgs("{s}___", .{namespace});
+        }
+        
+        self.writeArgs("{s}", .{symbol.text});
     }
     
     fn createHiddenVar(self: *Cgen, buffer: []u8) []const u8 {
@@ -183,13 +192,17 @@ const Cgen = struct {
         if (should_create_decl) {
             if (fn_decl.extern_name) |extern_name| {
                 self.setToTypedef();
-                self.writeArgs("#define {s} {s}\n", .{fn_decl.name.text, extern_name});
+                self.writeArgs("#define ", .{});
+                self.writeSymbol(fn_decl.name);
+                self.writeArgs(" {s}\n", .{extern_name});
             }
             
             self.setToFnForward();
             
             self.genType(fn_decl.return_typ);
-            self.writeArgs(" {s}(", .{fn_decl.name.text});
+            self.write(" ");
+            self.writeSymbol(fn_decl.name);
+            self.writeArgs("(", .{});
             
             for (fn_decl.params, 0..) |param, i| {
                 if (i > 0) {
@@ -207,7 +220,9 @@ const Cgen = struct {
             self.setToFn();
             
             self.genType(fn_decl.return_typ);
-            self.writeArgs(" {s}(", .{fn_decl.name.text});
+            self.write(" ");
+            self.writeSymbol(fn_decl.name);
+            self.writeArgs("(", .{});
             
             for (fn_decl.params, 0..) |param, i| {
                 if (i > 0) {
@@ -221,15 +236,19 @@ const Cgen = struct {
             self.write(") ");
             
             if (fn_decl.body) |body| {
-                self.genBlock(&body);
+                self.genBlock(&body, false);
+            }
+            else {
+                self.write("{{}}");
             }
             
             self.write("\n\n");
         }
     }
     
-    fn genStmt(self: *Cgen, stmt: *const tast.Stmt) void {
+    fn genStmt(self: *Cgen, stmt: *const tast.Stmt, dont_create_block: bool) void {
         var has_semicolon = true;
+        var has_newline = true;
         
         switch (stmt.*) {
             .var_decl   => |var_decl|  { self.genVarDecl(&var_decl, false); },
@@ -240,7 +259,7 @@ const Cgen = struct {
             .whil       => |whil|      { self.genWhile(&whil); has_semicolon = false; },
             .for_range  => |for_range| { self.genForRange(&for_range); has_semicolon = false; },
             .for_each   => |for_each|  { self.genForEach(&for_each); has_semicolon = false; },
-            .block      => |block|     { self.genBlock(&block); has_semicolon = false; },
+            .block      => |block|     { self.genBlock(&block, dont_create_block); has_semicolon = false; has_newline = false; },
             
             else => {
                 std.debug.panic("TODO: genStmt {s}", .{@tagName(stmt.*)});
@@ -251,31 +270,43 @@ const Cgen = struct {
             self.write(";");
         }
         
-        self.write("\n");
+        if (has_newline) {
+            self.write("\n");
+        }
     }
     
-    fn genBlock(self: *Cgen, block: *const tast.Block) void {
-        self.write("{{\n");
-        self.indent += 1;
-        
-        for (block.stmts) |stmt| {
-            self.writeIndent();
-            self.genStmt(&stmt);
+    fn genBlock(self: *Cgen, block: *const tast.Block, dont_create_block: bool) void {
+        if (!dont_create_block) {
+            self.write("{{\n");
+            self.indent += 1;
         }
         
-        self.indent -= 1;
-        self.writeIndent();
-        self.write("}}");
+        for (block.stmts, 0..) |stmt, i| {
+            if (i > 0 or !dont_create_block) {
+                self.writeIndent();
+            }
+            
+            self.genStmt(&stmt, false);
+        }
+        
+        if (!dont_create_block) {
+            self.indent -= 1;
+            self.writeIndent();
+            self.write("}}");
+        }
     }
     
     fn genVarDecl(self: *Cgen, decl: *const tast.VarDecl, is_top_level: bool) void {
         if (is_top_level and decl.kind == .Const) {
-            self.writeArgs("#define {s} ", .{decl.name.text});
+            self.write("#define ");
+            self.writeSymbol(decl.name);
+            self.write(" ");
             self.genExpr(decl.value.?);
         }
         else {
             self.genType(decl.typ);
-            self.writeArgs(" {s}", .{decl.name.text});
+            self.write(" ");
+            self.writeSymbol(decl.name);
             
             if (decl.value) |value| {
                 self.write(" = ");
@@ -303,6 +334,38 @@ const Cgen = struct {
     fn genFnCall(self: *Cgen, fn_call: *const tast.FnCall) void {
         if (fn_call.callee.value == .builtin) {
             self.genBuiltin(&fn_call.callee.value.builtin, fn_call.args);
+        }
+        else if (fn_call.callee.value == .struct_method) {
+            const struct_typ = fn_call.callee.value.struct_method.struct_typ.value.@"struct";
+            const method = struct_typ.methods[fn_call.callee.value.struct_method.method_index];
+            
+            self.writeSymbol(method.name);
+            self.write("(");
+            
+            self.genExpr(fn_call.callee.value.struct_method.callee);
+            
+            for (fn_call.args) |arg| {
+                self.write(", ");                
+                self.genExpr(&arg);
+            }
+            
+            self.write(")");
+        }
+        else if (fn_call.callee.value == .enum_method) {
+            const enum_typ = fn_call.callee.value.enum_method.enum_typ.value.@"enum";
+            const method = enum_typ.methods[fn_call.callee.value.enum_method.method_index];
+            
+            self.writeSymbol(method.name);
+            self.write("(");
+            
+            self.genExpr(fn_call.callee.value.enum_method.callee);
+            
+            for (fn_call.args) |arg| {
+                self.write(", ");                
+                self.genExpr(&arg);
+            }
+            
+            self.write(")");
         }
         else {
             self.genExpr(fn_call.callee);
@@ -335,7 +398,7 @@ const Cgen = struct {
         self.write(") {{\n");
         self.indent += 1;
         self.writeIndent();
-        self.genStmt(iff.body);
+        self.genStmt(iff.body, true);
         self.indent -= 1;
         self.writeIndent();
         self.write("}}");
@@ -344,7 +407,7 @@ const Cgen = struct {
             self.write(" else {{\n");
             self.indent += 1;
             self.writeIndent();
-            self.genStmt(else_stmt);
+            self.genStmt(else_stmt, true);
             self.indent -= 1;
             self.writeIndent();
             self.write("}}");
@@ -357,7 +420,7 @@ const Cgen = struct {
         self.write(") {{\n");
         self.indent += 1;
         self.writeIndent();
-        self.genStmt(whil.body);
+        self.genStmt(whil.body, true);
         self.indent -= 1;
         self.writeIndent();
         self.write("}}");
@@ -381,18 +444,12 @@ const Cgen = struct {
         self.genExpr(for_range.end);
         self.writeArgs("; {s}++) ", .{var_name});
         
-        if (for_range.body.* != .block) {
-            self.write("{{\n");
-            self.indent += 1;
-        }
-        
-        self.genStmt(for_range.body);
-        
-        if (for_range.body.* != .block) {
-            self.indent -= 1;
-            self.writeIndent();
-            self.write("}}");
-        }
+        self.write("{{\n");
+        self.indent += 1;
+        self.genStmt(for_range.body, true);
+        self.indent -= 1;
+        self.writeIndent();
+        self.write("}}");
     }
     
     fn genForEach(self: *Cgen, for_each: *const tast.ForEach) void {        
@@ -418,26 +475,28 @@ const Cgen = struct {
         self.writeIndent();
         self.writeArgs("for (int {[index_var]s} = 0; {[index_var]s} < {[iter_var]s}.len; {[index_var]s}++) ", .{ .index_var = index_var_name, .iter_var = iter_name });
         
-        if (for_each.item_var != null or for_each.body.* != .block) {
-            self.write("{{\n");
-            self.indent += 1;
+        self.write("{{\n");
+        self.indent += 1;
+        
+        if (for_each.item_var) |item_var| {
+            self.writeIndent();
+            self.genType(for_each.item_typ.?);
+            self.writeArgs(" {s} = ", .{item_var.text,});
             
-            if (for_each.item_var) |item_var| {
-                self.writeIndent();
-                self.genType(for_each.item_typ.?);
-                self.writeArgs(" {s} = {s}.items[{s}];\n", .{item_var.text, iter_name, index_var_name});
+            if (for_each.is_reference) {
+                self.write("&");
             }
             
-            self.writeIndent();
+            self.writeArgs("{s}.items[{s}];\n", .{iter_name, index_var_name});
         }
         
-        self.genStmt(for_each.body);
+        self.writeIndent();
         
-        if (for_each.item_var != null or for_each.body.* != .block) {
-            self.indent -= 1;
-            self.writeIndent();
-            self.write("}}\n");
-        }
+        self.genStmt(for_each.body, true);
+        
+        self.indent -= 1;
+        self.writeIndent();
+        self.write("}}\n");
     }
     
     fn genExpr(self: *Cgen, expr: *const tast.Expr) void {
@@ -451,7 +510,10 @@ const Cgen = struct {
             .array_index   => |arr|     { self.genArrayIndex(&arr); },
             .struct_value  => |val|     { self.genStructValue(&val, expr.typ); },
             .struct_member => |mem|     { self.genStructMember(&mem); },
+            .enum_value    => |val|     { self.genEnumValue(&val, expr.typ); },
             .cast          => |cast|    { self.genCast(&cast); },
+            .referenc_of   => |refof|   { self.genReferenceOf(&refof); },
+            .dereferenc_of => |derefof| { self.genDereferenceOf(&derefof); },
             .builtin       => |builtin| { self.genBuiltin(&builtin, &.{}); },
             
             else => {
@@ -461,7 +523,7 @@ const Cgen = struct {
     }
     
     fn genIdentifier(self: *Cgen, ident: *const tast.Identifier) void {
-        self.writeArgs("{s}", .{ident.name.text});
+        self.writeSymbol(ident.name);
     }
     
     fn genLiteral(self: *Cgen, lit: *const tast.Literal) void {
@@ -470,10 +532,7 @@ const Cgen = struct {
             .int    => self.writeArgs("{}", .{lit.int}),
             .float  => self.writeArgs("{}", .{lit.float}),
             .string => self.writeArgs("\"{s}\"", .{lit.string}),
-            
-            else => {
-                std.debug.panic("TODO: genLiteral {s}", .{@tagName(lit.*)});
-            }
+            .char   => self.writeArgs("'{c}'", .{lit.char}),
         }
     }
     
@@ -582,7 +641,17 @@ const Cgen = struct {
     
     fn genStructMember(self: *Cgen, mem: *const tast.StructMember) void {
         self.genExpr(mem.callee);
-        self.writeArgs(".{s}", .{mem.callee.typ.value.struc.fields[mem.member_index].name.text});
+        
+        if (mem.callee.typ.value == .reference) {
+            self.writeArgs("->{s}", .{mem.callee.typ.value.reference.child.value.@"struct".fields[mem.member_index].name.text});
+        }
+        else {
+            self.writeArgs(".{s}", .{mem.callee.typ.value.@"struct".fields[mem.member_index].name.text});
+        }
+    }
+    
+    fn genEnumValue(self: *Cgen, val: *const tast.EnumValue, typ: *const Type) void {
+        self.writeArgs("{s}_{s}", .{typ.value.@"enum".name.text, typ.value.@"enum".items[val.item_index].text});        
     }
     
     fn genCast(self: *Cgen, cast: *const tast.Cast) void {
@@ -590,6 +659,17 @@ const Cgen = struct {
         self.genType(cast.typ);
         self.write(")");
         self.genExpr(cast.value);
+        self.write(")");
+    }
+    
+    fn genReferenceOf(self: *Cgen, refof: *const tast.ReferenceOf) void {
+        self.write("&");
+        self.genExpr(refof.value);
+    }
+    
+    fn genDereferenceOf(self: *Cgen, refof: *const tast.DereferenceOf) void {
+        self.write("*(");
+        self.genExpr(refof.value);
         self.write(")");
     }
     
@@ -612,6 +692,11 @@ const Cgen = struct {
             .string,
             .void => {
                 typ.getText(self.cur_src, self.allocator);
+                return;
+            },
+            .reference => {
+                self.genType(typ.value.reference.child);
+                self.write("*");
                 return;
             },
             
@@ -659,8 +744,8 @@ const Cgen = struct {
                     self.writeArgs("{s}", .{temp_child.items});
                 },
                 
-                .struc => {
-                    const struct_name = typ.value.struc.name.text;
+                .@"struct" => {
+                    const struct_name = typ.value.@"struct".name.text;
                     var temp = std.ArrayList(u8).empty;
                     defer temp.clearAndFree(self.allocator);
                     
@@ -669,7 +754,7 @@ const Cgen = struct {
                     
                     self.write("typedef struct {{ ");
                     
-                    for (typ.value.struc.fields) |field| {
+                    for (typ.value.@"struct".fields) |field| {
                         self.genType(field.typ);
                         self.writeArgs(" {s}; ", .{field.name.text});
                     }
@@ -683,6 +768,31 @@ const Cgen = struct {
                     self.type_map.put(typ.type_id, struct_name) catch unreachable;
                     
                     self.writeArgs("{s}", .{struct_name});
+                },
+                
+                .@"enum" => {
+                    const enum_name = typ.value.@"enum".name.text;
+                    var temp = std.ArrayList(u8).empty;
+                    defer temp.clearAndFree(self.allocator);
+                    
+                    const last_src = self.cur_src;
+                    self.setToList(&temp);
+                    
+                    self.write("typedef enum {{\n");
+                    
+                    for (typ.value.@"enum".items) |item| {
+                        self.writeArgs("    {s}_{s},\n", .{enum_name, item.text});
+                    }
+                    
+                    self.writeArgs("}} {s};\n", .{enum_name});
+                    
+                    self.setToTypedef();
+                    self.writeArgs("{s}", .{temp.items});
+                    self.cur_src = last_src;
+                    
+                    self.type_map.put(typ.type_id, enum_name) catch unreachable;
+                    
+                    self.writeArgs("{s}", .{enum_name});
                 },
                 
                 else => {
@@ -779,13 +889,17 @@ fn execAndWaitStreaming(allocator: std.mem.Allocator, cmd: []const []const u8) !
     try proc.spawn();
     
     var buffer: [1024]u8 = undefined;
+    var stdout_buffer: [1024]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+    const writer = &stdout_writer.interface;
     
     while (true) {
         const bytes_read = try proc.stdout.?.read(&buffer);        
         if (bytes_read == 0) break;
         
-        std.debug.print("{s}", .{buffer[0..bytes_read]});
-    }
+        writer.print("{s}", .{buffer[0..bytes_read]}) catch unreachable;
+        writer.flush() catch unreachable;
+    }    
     
     const term = try proc.wait();
     

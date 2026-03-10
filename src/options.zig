@@ -3,6 +3,7 @@ const std = @import("std");
 pub const ErrMode = enum {
     normal,
     minimal,
+    dev,
 };
 
 entry_file: []const u8,
@@ -49,13 +50,16 @@ pub fn parse(args: *std.process.ArgIterator) CompilerOptions {
                 showUsage(program_name, "--emit needs an argument");
             }
         }
-        else if (std.mem.eql(u8, arg, "-err")) {
+        else if (std.mem.eql(u8, arg, "--err")) {
             if (args.next()) |sub_arg| {
                 if (std.mem.eql(u8, sub_arg, "normal")) {
                     opt.err_mode = .normal;
                 }
                 else if (std.mem.eql(u8, sub_arg, "minimal")) {
                     opt.err_mode = .minimal;
+                }
+                else if (std.mem.eql(u8, sub_arg, "dev")) {
+                    opt.err_mode = .dev;
                 }
                 else {
                     showUsage(program_name, "Invalid --err argument");

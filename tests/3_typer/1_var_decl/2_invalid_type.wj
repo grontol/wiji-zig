@@ -3,5 +3,5 @@ fn main() {
 }
 
 /***
-Type 'string' cannot be assigned to 'i32'
+Type `string` cannot be assigned to `i32`
 ***/

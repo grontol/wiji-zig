@@ -102,6 +102,7 @@ pub const ForEach = struct {
     item_var: ?Symbol,
     item_typ: ?*const Type,
     index_var: ?Symbol,
+    is_reference: bool,
     iter: *Expr,
     body: *Stmt,
 };
@@ -172,6 +173,22 @@ pub const StructMember = struct {
     member_index: usize,
 };
 
+pub const StructMethod = struct {
+    callee: *Expr,
+    method_index: usize,
+    struct_typ: *const Type,
+};
+
+pub const EnumValue = struct {
+    item_index: usize,
+};
+
+pub const EnumMethod = struct {
+    callee: *Expr,
+    method_index: usize,
+    enum_typ: *const Type,
+};
+
 pub const LiteralKind = enum {
     int,
     float,
@@ -189,6 +206,16 @@ pub const Literal = union(LiteralKind) {
 };
 
 pub const Cast = struct {
+    value: *Expr,
+    typ: *const Type,
+};
+
+pub const ReferenceOf = struct {
+    value: *Expr,
+    typ: *const Type,
+};
+
+pub const DereferenceOf = struct {
     value: *Expr,
     typ: *const Type,
 };
@@ -267,10 +294,16 @@ pub const ExprKind = enum {
     array_index,
     struct_value,
     struct_member,
-    cast,
+    struct_method,
+    enum_value,
+    enum_method,
     iff,
+    cast,
+    referenc_of,
+    dereferenc_of,
     block,
     builtin,
+    invalid,
 };
 
 pub const Expr = struct {
@@ -285,10 +318,16 @@ pub const Expr = struct {
         array_index: ArrayIndex,
         struct_value: StructValue,
         struct_member: StructMember,
-        cast: Cast,
+        struct_method: StructMethod,
+        enum_value: EnumValue,
+        enum_method: EnumMethod,
         iff: IfExpr,
+        cast: Cast,
+        referenc_of: ReferenceOf,
+        dereferenc_of: DereferenceOf,
         block: BlockExpr,
         builtin: Builtin,
+        invalid,
     },
     typ: *const Type,
 };
@@ -299,14 +338,25 @@ pub const Printer = struct {
     
     level: usize = 0,
     
+    writer: std.fs.File.Writer,
+    
     pub fn init(allocator: std.mem.Allocator) Printer {
+        const buffer = allocator.alloc(u8, 1024) catch unreachable;
+        
         return .{
             .allocator = allocator,
+            .writer = std.fs.File.stdout().writer(buffer),
         };
     }
     
-    fn print(_: *const Printer, comptime fmt: []const u8, args: anytype) void {
-        std.debug.print(fmt, args);
+    fn print(self: *Printer, comptime fmt: []const u8, args: anytype) void {
+        const writer = &self.writer.interface;
+        writer.print(fmt, args) catch unreachable;
+    }
+    
+    fn flush(self: *Printer) void {
+        const writer = &self.writer.interface;
+        writer.flush() catch unreachable;
     }
     
     fn getTypeText(self: *Printer, typ: *const Type) []const u8 {
@@ -316,21 +366,21 @@ pub const Printer = struct {
         return self.temp_text.items;
     }
     
-    fn indent(self: *const Printer, level: usize) void {
+    fn indent(self: *Printer, level: usize) void {
         for (0..level * 4) |_| {
             self.print(" ", .{});
         }
     }
     
-    fn indentCurrent(self: *const Printer) void {
+    fn indentCurrent(self: *Printer) void {
         self.indent(self.level);
     }
     
-    fn nl(self: *const Printer) void {
+    fn nl(self: *Printer) void {
         self.print("\n", .{});
     }
     
-    fn commaNl(self: *const Printer) void {
+    fn commaNl(self: *Printer) void {
         self.print(",\n", .{});
     }
     
@@ -345,16 +395,16 @@ pub const Printer = struct {
         self.print("}}", .{});
     }
     
-    fn memberBegin(self: *const Printer, name: []const u8) void {
+    fn memberBegin(self: *Printer, name: []const u8) void {
         self.indent(self.level);
         self.print("{s}: ", .{name});
     }
     
-    fn memberEnd(self: *const Printer) void {
+    fn memberEnd(self: *Printer) void {
         self.print(",\n", .{});
     }
     
-    fn memberWithValue(self: *const Printer, name: []const u8, comptime fmt: []const u8, args: anytype) void {
+    fn memberWithValue(self: *Printer, name: []const u8, comptime fmt: []const u8, args: anytype) void {
         self.memberBegin(name);
         self.print(fmt, args);
         self.memberEnd();
@@ -371,7 +421,7 @@ pub const Printer = struct {
         self.print("]", .{});
     }
     
-    fn arrayEmpty(self: *const Printer) void {
+    fn arrayEmpty(self: *Printer) void {
         self.print("[]", .{});
     }
     
@@ -390,6 +440,8 @@ pub const Printer = struct {
         self.memberEnd();
         self.blockEnd();
         self.nl();
+        
+        self.flush();
     }
     
     fn printFnDecl(self: *Printer, fn_decl: *const FnDecl) void {
@@ -594,13 +646,15 @@ pub const Printer = struct {
         self.print("<{s}> ", .{self.getTypeText(expr.typ)});
         
         switch (expr.value) {
-            .literal    => |lit|   { self.printLiteral(&lit); },
-            .identifier => |ident| { self.print("Identifier('{s}')", .{ident.name.text}); },
-            .fn_call    => |call|  { self.printFnCall(&call); },
-            .binary     => |bin|   { self.printBinary(&bin); },
-            .cast       => |cast|  { self.printCast(&cast); },
-            .iff        => |iff|   { self.printIfExpr(&iff); },
-            .block      => |block| { self.printBlockExpr(&block); },
+            .literal       => |lit|   { self.printLiteral(&lit); },
+            .identifier    => |ident| { self.print("Identifier('{s}')", .{ident.name.text}); },
+            .fn_call       => |call|  { self.printFnCall(&call); },
+            .binary        => |bin|   { self.printBinary(&bin); },
+            .cast          => |cast|  { self.printCast(&cast); },
+            .iff           => |iff|   { self.printIfExpr(&iff); },
+            .block         => |block| { self.printBlockExpr(&block); },
+            .struct_value  => |_| { self.print("[StructValue]", .{}); },
+            .struct_method => |_| { self.print("[StructMethod]", .{}); },
             
             else => {
                 std.debug.panic("TODO: printExpr {s}", .{@tagName(expr.value)});

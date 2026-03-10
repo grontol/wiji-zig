@@ -1,7 +1,7 @@
 fn main() {
-    val a: i32
-    val b: char
-    val c: string
+    var a: i32
+    var b: char
+    var c: string
     
     a = 20
     b = '\n'

@@ -56,9 +56,7 @@ Module {
                     If {
                         cond: <bool> Binary {
                             lhs: <i32> Identifier('a'),
-                            rhs: <i32> Cast {
-                                value: <int> 5,
-                            },
+                            rhs: <int> 5,
                             op: gt,
                         },
                         body: Block {
@@ -66,9 +64,7 @@ Module {
                                 If {
                                     cond: <bool> Binary {
                                         lhs: <i32> Identifier('b'),
-                                        rhs: <i32> Cast {
-                                            value: <int> 10,
-                                        },
+                                        rhs: <int> 10,
                                         op: lt,
                                     },
                                     body: Block {
@@ -83,9 +79,7 @@ Module {
                                             If {
                                                 cond: <bool> Binary {
                                                     lhs: <i32> Identifier('c'),
-                                                    rhs: <i32> Cast {
-                                                        value: <int> 3,
-                                                    },
+                                                    rhs: <int> 3,
                                                     op: gt,
                                                 },
                                                 body: Block {
@@ -114,9 +108,7 @@ Module {
                                             If {
                                                 cond: <bool> Binary {
                                                     lhs: <i32> Identifier('c'),
-                                                    rhs: <i32> Cast {
-                                                        value: <int> 3,
-                                                    },
+                                                    rhs: <int> 3,
                                                     op: gt,
                                                 },
                                                 body: Block {

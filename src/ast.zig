@@ -49,6 +49,10 @@ pub const StructValue = struct {
     elems: []const StructValueElem,
 };
 
+pub const EnumValue = struct {
+    item: Token,
+};
+
 pub const VarDecl = struct {
     is_public: bool,
     decl: Token,
@@ -87,6 +91,13 @@ pub const StructField = struct {
     name: Token,
     typ: ?Type,
     default_value: ?*Expr,
+};
+
+pub const EnumDecl = struct {
+    is_public: bool,
+    name: Token,
+    items: []const Token,
+    members: []const Expr,
 };
 
 pub const Unary = struct {
@@ -132,6 +143,7 @@ pub const Block = struct {
 pub const For = struct {
     item_var: ?Token,
     index_var: ?Token,
+    is_reference: bool,
     iter: *Expr,
     body: *Expr,
 };
@@ -155,6 +167,15 @@ pub const Assignment = struct {
 
 pub const Return = struct {
     value: ?*Expr,
+};
+
+pub const AddressOf = struct {
+    value: *Expr,
+};
+
+pub const Cast = struct {
+    value: *Expr,
+    typ: Type,
 };
 
 pub const Intrinsic = struct {};
@@ -189,10 +210,12 @@ pub const Kind = enum {
     literal,
     array_value,
     struct_value,
+    enum_value,
     
     var_decl,
     fn_decl,
     struct_decl,
+    enum_decl,
     
     unary,
     binary,
@@ -207,6 +230,8 @@ pub const Kind = enum {
     
     assignment,
     returns,
+    address_of,
+    cast,
     intrinsic,
     import,
 };
@@ -219,10 +244,12 @@ pub const Expr = struct {
         literal: Literal,
         array_value: ArrayValue,
         struct_value: StructValue,
+        enum_value: EnumValue,
         
         var_decl: VarDecl,
         fn_decl: FnDecl,
         struct_decl: StructDecl,
+        enum_decl: EnumDecl,
         
         unary: Unary,
         binary: Binary,
@@ -237,6 +264,8 @@ pub const Expr = struct {
         
         assignment: Assignment,
         returns: Return,
+        address_of: AddressOf,
+        cast: Cast,
         intrinsic: Intrinsic,
         import: Import,
     },
@@ -313,29 +342,46 @@ pub const Printer = struct {
     file_manager: *const FileManager,
     level: usize = 0,
     
-    fn print(_: *const Printer, comptime fmt: []const u8, args: anytype) void {
-        std.debug.print(fmt, args);
+    writer: std.fs.File.Writer,
+    
+    pub fn init(allocator: std.mem.Allocator, file_manager: *FileManager) Printer {
+        const buffer = allocator.alloc(u8, 1024) catch unreachable;
+        
+        return .{
+            .file_manager = file_manager,
+            .writer = std.fs.File.stdout().writer(buffer),
+        };
     }
     
-    fn indent(self: *const Printer, level: usize) void {
+    fn print(self: *Printer, comptime fmt: []const u8, args: anytype) void {
+        const writer = &self.writer.interface;
+        writer.print(fmt, args) catch unreachable;
+    }
+    
+    fn flush(self: *Printer) void {
+        const writer = &self.writer.interface;
+        writer.flush() catch unreachable;
+    }
+    
+    fn indent(self: *Printer, level: usize) void {
         for (0..level * 4) |_| {
             self.print(" ", .{});
         }
     }
     
-    fn indentCurrent(self: *const Printer) void {
+    fn indentCurrent(self: *Printer) void {
         self.indent(self.level);
     }
     
-    fn nl(self: *const Printer) void {
+    fn nl(self: *Printer) void {
         self.print("\n", .{});
     }
     
-    fn commaNl(self: *const Printer) void {
+    fn commaNl(self: *Printer) void {
         self.print(",\n", .{});
     }
     
-    fn tokenText(self: *const Printer, token: Token) []const u8 {
+    fn tokenText(self: *Printer, token: Token) []const u8 {
         const src = self.file_manager.getContent(token.loc.file_id);
         return src[token.loc.index..token.loc.index + token.loc.len];
     }
@@ -351,16 +397,16 @@ pub const Printer = struct {
         self.print("}}", .{});
     }
     
-    fn memberBegin(self: *const Printer, name: []const u8) void {
+    fn memberBegin(self: *Printer, name: []const u8) void {
         self.indent(self.level);
         self.print("{s}: ", .{name});
     }
     
-    fn memberEnd(self: *const Printer) void {
+    fn memberEnd(self: *Printer) void {
         self.print(",\n", .{});
     }
     
-    fn memberWithValue(self: *const Printer, name: []const u8, comptime fmt: []const u8, args: anytype) void {
+    fn memberWithValue(self: *Printer, name: []const u8, comptime fmt: []const u8, args: anytype) void {
         self.memberBegin(name);
         self.print(fmt, args);
         self.memberEnd();
@@ -377,7 +423,7 @@ pub const Printer = struct {
         self.print("]", .{});
     }
     
-    fn arrayEmpty(self: *const Printer) void {
+    fn arrayEmpty(self: *Printer) void {
         self.print("[]", .{});
     }
     
@@ -403,6 +449,8 @@ pub const Printer = struct {
         self.memberEnd();
         self.blockEnd();
         self.nl();
+        
+        self.flush();
     }
     
     fn printExpr(self: *Printer, expr: *const Expr) void {
@@ -424,6 +472,7 @@ pub const Printer = struct {
             Kind.struct_value => self.printStructValue(&expr.value.struct_value),
             Kind.member_access => self.printMemberAccess(&expr.value.member_access),
             Kind.returns => self.printReturn(&expr.value.returns),
+            Kind.import => self.printImport(&expr.value.import),
             
             else => {
                 std.debug.panic("Not Implemented : print {s}", .{@tagName(expr.value)});
@@ -809,6 +858,16 @@ pub const Printer = struct {
             self.printExpr(e);
             self.memberEnd();
         }
+        
+        self.blockEnd();
+    }
+    
+    fn printImport(self: *Printer, imp: *const Import) void {
+        self.blockBegin("Import");
+        
+        self.memberBegin("path");
+        self.memberWithValue("path", "{s}", .{self.tokenText(imp.path)});
+        self.memberEnd();
         
         self.blockEnd();
     }

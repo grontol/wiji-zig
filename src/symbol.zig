@@ -4,11 +4,13 @@ const Type = @import("type.zig").Type;
 pub const Symbol = struct {
     id: usize,
     text: []const u8,
+    namespaces: []const []const u8,
 };
 
 pub const TypedSymbol = struct {
     symbol: Symbol,
     typ: *const Type,
+    child_symbols: ?*std.StringHashMap(TypedSymbol),
 };
 
 pub const SymbolManager = struct {
@@ -16,6 +18,7 @@ pub const SymbolManager = struct {
     name_map: std.StringHashMap([]const u8),
     name_list: StringList,
     global_index: usize,
+    namespaces: std.ArrayList([]const u8) = .empty,
     
     pub fn init(allocator: std.mem.Allocator) SymbolManager {
         return .{
@@ -26,22 +29,14 @@ pub const SymbolManager = struct {
         };
     }
     
-    pub fn createSymbol(self: *SymbolManager, name: []const u8) Symbol {
-        const saved_name = blk: {
-            const res = self.name_map.get(name);
-            if (res) |r| {
-                break :blk r;
-            }
-            
-            const new_name = self.name_list.append(name);
-            self.name_map.put(name, new_name) catch unreachable;
-            
-            break :blk new_name;
-        };
+    pub fn createSymbol(self: *SymbolManager, name: []const u8, namespaced: bool) Symbol {
+        const namespaces = if (namespaced) self.allocator.dupe([]const u8, self.namespaces.items) catch unreachable
+        else &.{};
         
         const sym = Symbol{
             .id = self.global_index,
-            .text = saved_name,
+            .text = self.createName(name),
+            .namespaces = namespaces,
         };
         
         self.global_index += 1;
@@ -49,13 +44,24 @@ pub const SymbolManager = struct {
         return sym;
     }
     
-    pub fn pushNamespace(self: *SymbolManager, namespace: Symbol) void {
-        _ = self;
-        _ = namespace;
+    pub fn pushNamespace(self: *SymbolManager, namespace: []const u8) void {
+        self.namespaces.append(self.allocator, namespace) catch unreachable;
     }
     
     pub fn popNamespace(self: *SymbolManager) void {
-        _ = self;
+        _ = self.namespaces.pop();
+    }
+    
+    fn createName(self: *SymbolManager, name: []const u8) []const u8 {
+        const res = self.name_map.get(name);
+        if (res) |r| {
+            return r;
+        }
+        
+        const new_name = self.name_list.append(name);
+        self.name_map.put(name, new_name) catch unreachable;
+        
+        return new_name;
     }
 };
 

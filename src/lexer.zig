@@ -139,6 +139,7 @@ const Lexer = struct {
         else if (std.mem.eql(u8, text, "else"))      { self.pushToken(TokenKind.KeywordElse, start, end); }
         else if (std.mem.eql(u8, text, "pub"))       { self.pushToken(TokenKind.KeywordPub, start, end); }
         else if (std.mem.eql(u8, text, "struct"))    { self.pushToken(TokenKind.KeywordStruct, start, end); }
+        else if (std.mem.eql(u8, text, "enum"))      { self.pushToken(TokenKind.KeywordEnum, start, end); }
         else if (std.mem.eql(u8, text, "interface")) { self.pushToken(TokenKind.KeywordInterface, start, end); }
         else if (std.mem.eql(u8, text, "import"))    { self.pushToken(TokenKind.KeywordImport, start, end); }
         else if (std.mem.eql(u8, text, "as"))        { self.pushToken(TokenKind.KeywordAs, start, end); }
@@ -211,7 +212,7 @@ const Lexer = struct {
                     .has_nl_before = self.has_nl_before,
                 };
                 
-                self.reporter.reportErrorAtToken(token, "Invalid float literal");
+                self.reporter.reportErrorAtToken(token, "Invalid float literal", .{});
             }
         }
         
@@ -253,7 +254,7 @@ const Lexer = struct {
             }
             
             if (!closed) {
-                self.reporter.reportErrorAtPos(self.file_id, self.line, self.col, start, self.chs.index, "Unclosed comment");
+                self.reporter.reportErrorAtPos(self.file_id, self.line, self.col, start, self.chs.index, "Unclosed comment", .{});
             }
         }
         else {
@@ -275,7 +276,7 @@ const Lexer = struct {
                 break;
             }
             else if (ch == '\n') {
-                self.reporter.reportErrorAtPos(self.file_id, self.line, self.col, start, end - start, "Unclosed string literal");
+                self.reporter.reportErrorAtPos(self.file_id, self.line, self.col, start, end - start, "Unclosed string literal", .{});
             }
         }
         
@@ -283,7 +284,7 @@ const Lexer = struct {
             self.pushToken(.StringLit, start, end);
         }
         else {
-            self.reporter.reportErrorAtPos(self.file_id, self.line, self.col, start, end - start, "Unclosed string literal");
+            self.reporter.reportErrorAtPos(self.file_id, self.line, self.col, start, end - start, "Unclosed string literal", .{});
         }
     }
     
@@ -300,12 +301,12 @@ const Lexer = struct {
                 },
                 
                 else => {
-                    self.reporter.reportErrorAtPos(self.file_id, self.line, self.col, start + 1, 2, "Invalid char escape");
+                    self.reporter.reportErrorAtPos(self.file_id, self.line, self.col, start + 1, 2, "Invalid char escape", .{});
                 }
             }
         }
         else if (ch == '\'') {
-            self.reporter.reportErrorAtPos(self.file_id, self.line, self.col, start, 2, "Invalid char literal");
+            self.reporter.reportErrorAtPos(self.file_id, self.line, self.col, start, 2, "Invalid char literal", .{});
         }
         
         const should_be_close_quote = self.chs.next();
@@ -322,7 +323,7 @@ const Lexer = struct {
                 }
             }
             
-            self.reporter.reportErrorAtPos(self.file_id, self.line, self.col, start, end - start + 1, "Invalid char literal");
+            self.reporter.reportErrorAtPos(self.file_id, self.line, self.col, start, end - start + 1, "Invalid char literal", .{});
         }
     }
     
@@ -469,7 +470,7 @@ pub fn tokenize(allocator: std.mem.Allocator, reporter: Reporter, file_id: usize
             },
             
             else => {
-                reporter.reportErrorAtPosArgs(file_id, lexer.line, lexer.col, i, 1, "Unknown character '{c}'", .{ ch });
+                reporter.reportErrorAtPos(file_id, lexer.line, lexer.col, i, 1, "Unknown character '{c}'", .{ ch });
             },
         }
         

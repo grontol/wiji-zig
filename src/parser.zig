@@ -79,7 +79,7 @@ const TokenStream = struct {
         }
         else {
             const next_token = self.next();
-            self.reporter.reportErrorAtTokenArgs(next_token, "Expected `{s}` but got `{s}`", .{
+            self.reporter.reportErrorAtToken(next_token, "Expected `{s}` but got `{s}`", .{
                 @tagName(kind),
                 @tagName(next_token.kind),
             });
@@ -108,7 +108,7 @@ const TokenStream = struct {
             str.appendSlice(allocator, @tagName(kind)) catch unreachable;
         }
         
-        self.reporter.reportErrorAtTokenArgs(peek_token, "Expected `{s}` but got `{s}`", .{
+        self.reporter.reportErrorAtToken(peek_token, "Expected `{s}` but got `{s}`", .{
             str.items,
             @tagName(peek_token.kind),
         });
@@ -206,7 +206,10 @@ const Parser = struct {
         while (self.ts.hasNext()) {
             switch (self.ts.peek().kind) {
                 TokenKind.KeywordPub => _ = self.ts.next(),
-                TokenKind.KeywordStruct => res = true,
+                TokenKind.KeywordStruct => {
+                    res = true;
+                    break;
+                },
                 else => break,
             }
         }
@@ -297,6 +300,14 @@ const Parser = struct {
             ops.clearAndFree(self.temp_allocator);
         }
         
+        if (self.ts.peek().kind == .DotDot) {
+            expr = self.parseRange(expr);
+        }
+        
+        if (self.ts.peek().kind == .KeywordAs) {
+            expr = self.parseCast(expr);
+        }
+        
         return expr;
     }
     
@@ -358,7 +369,7 @@ const Parser = struct {
                             }
                         },
                         TokenKind.Dot => expr = self.parseMemberAccess(expr),
-                        TokenKind.DotDot => expr = self.parseRange(expr),
+                        // TokenKind.DotDot => expr = self.parseRange(expr),
                         TokenKind.OpenSqBracket => expr = self.parseArrayIndex(expr),
                         else => break,
                     }
@@ -367,6 +378,7 @@ const Parser = struct {
             
             TokenKind.KeywordFn => expr = self.parseFnDecl(null),
             TokenKind.KeywordStruct => expr = self.parseStructDecl(),
+            TokenKind.KeywordEnum => expr = self.parseEnumDecl(),
             TokenKind.KeywordPub => {
                 if (self.hasFnNext()) {
                     expr = self.parseFnDecl(null);
@@ -378,7 +390,7 @@ const Parser = struct {
                     expr = self.parseStructDecl();
                 }
                 else {
-                    self.reporter.reportErrorAtToken(self.ts.peekN(2), "Invalid pub modifier");
+                    self.reporter.reportErrorAtToken(self.ts.peekN(2), "Invalid pub modifier", .{});
                 }
             },
             TokenKind.KeywordExtern => {
@@ -389,7 +401,7 @@ const Parser = struct {
                     expr = self.parseFnDecl(extern_);
                 }
                 else {
-                    self.reporter.reportErrorAtToken(extern_token, "extern modifier can only be applied to function");
+                    self.reporter.reportErrorAtToken(extern_token, "extern modifier can only be applied to function", .{});
                 }
             },
             TokenKind.KeywordFor => expr = self.parseFor(),
@@ -411,18 +423,26 @@ const Parser = struct {
                 else if (self.ts.peekN(2).kind == .OpenSqBracket) {
                     expr = self.parseArrayValue();
                 }
+                else if (self.ts.peekN(2).kind == .Identifier) {
+                    expr = self.parseEnumValue();
+                }
                 else if (self.ts.peekN(2).kind == .OpenParen) {
                     std.debug.panic("TODO: Parse tuple value", .{});
                 }
                 else {
-                    self.reporter.reportErrorAtToken(self.ts.next(), "Invalid dot");
+                    self.reporter.reportErrorAtToken(self.ts.next(), "Invalid dot", .{});
                 }
             },
             TokenKind.At => std.debug.panic("TODO: Parse intrinsic", .{}),
             TokenKind.KeywordReturn => { expr = self.parseReturn(); },
             TokenKind.Not,
             TokenKind.Minus => { expr = self.parseUnary(); },
+            TokenKind.And => { expr = self.parseAddressOf(); },
             TokenKind.KeywordImport => { expr = self.parseImport(); },
+            
+            TokenKind.Semicolon => {
+                self.reporter.reportErrorAtToken(self.ts.next(), "The languange doesn't use semicolon, please remove it", .{});
+            },
             
             else => {
                 std.debug.panic("Not Implemented : parsePrimaryExpr {s}", .{@tagName(kind)});
@@ -464,7 +484,7 @@ const Parser = struct {
         
         while (self.ts.peek().kind != .CloseParen) {
             if (!has_comma) {
-                self.reporter.reportErrorAtToken(self.ts.current(), "Expected comma");
+                self.reporter.reportErrorAtToken(self.ts.current(), "Expected comma", .{});
             }
             
             var is_variadic = false;
@@ -489,7 +509,7 @@ const Parser = struct {
             }
             
             if (param_type == null and param_default_value == null) {
-                self.reporter.reportErrorAtToken(param_name_token, "Expected type or default value");
+                self.reporter.reportErrorAtToken(param_name_token, "Expected type or default value", .{});
             }
             
             params.append(self.temp_allocator, ast.FnParam{
@@ -579,54 +599,156 @@ const Parser = struct {
         
         var fields = std.ArrayList(ast.StructField).empty;
         var members = std.ArrayList(ast.Expr).empty;
-        var has_comma = true;
-        var fields_done = false;
+        
+        const Mode = enum {
+            unknown,
+            field,
+            var_decl,
+            fn_decl,
+            struct_decl,
+        };
+        
+        var mode: Mode = .unknown;
         
         while (self.ts.hasNext()) {
             switch (self.ts.peek().kind) {
                 TokenKind.CloseCurlyBracket => break,
-                TokenKind.KeywordFn,
-                TokenKind.KeywordStruct => fields_done = true,
+                TokenKind.KeywordVar,
+                TokenKind.KeywordVal,
+                TokenKind.KeywordConst => mode = .fn_decl,
+                TokenKind.KeywordFn => mode = .fn_decl,
+                TokenKind.KeywordStruct => mode = .struct_decl,
                 TokenKind.KeywordPub => {
-                    if (self.hasFnNext() or self.hasStructNext()) {
-                        fields_done = true;
+                    if (self.hasVarDeclNext()) {
+                        mode = .var_decl;
+                    }
+                    else if (self.hasFnNext()) {
+                        mode = .fn_decl;
+                    }
+                    else if (self.hasStructNext()) {
+                        mode = .struct_decl;
                     }
                     else {
-                        self.reporter.reportErrorAtToken(self.ts.peekN(2), "Invalid pub modifier");
+                        self.reporter.reportErrorAtToken(self.ts.peekN(2), "Invalid pub modifier", .{});
+                    }
+                },
+                TokenKind.Identifier => {
+                    if (self.ts.peekN(2).kind == .Colon or self.ts.peekN(2).kind == .Eq) {
+                        mode = .field;
+                    }
+                    else {
+                        mode = .unknown;
+                    }
+                },
+                
+                else => {
+                    mode = .unknown;                    
+                }
+            }
+            
+            switch (mode) {
+                .unknown => {
+                    self.reporter.reportErrorAtToken(self.ts.peek(), "Only fields, variable, function & struct declaration are allowed inside struct", .{});
+                },
+                .field => {
+                    const field_name_token = self.ts.nextExpect(.Identifier);
+                    var field_typ: ?ast.Type = null;
+                    var field_default_value: ?*ast.Expr = null;
+                    
+                    if (self.ts.peek().kind == .Colon) {
+                        _ = self.ts.next();
+                        field_typ = self.parseType();
+                    }
+                    
+                    if (self.ts.peek().kind == .Eq) {
+                        _ = self.ts.next();
+                        field_default_value = self.makeExprPointer(self.parseExpr());
+                    }
+                    
+                    if (field_typ == null and field_default_value == null) {
+                        self.reporter.reportErrorAtToken(field_name_token, "Expected type or default value", .{});
+                    }
+                    
+                    fields.append(self.temp_allocator, ast.StructField{
+                        .name = field_name_token,
+                        .typ = field_typ,
+                        .default_value = field_default_value,
+                    }) catch unreachable;
+                    
+                    if (self.ts.peek().kind == .Comma) {
+                        _ = self.ts.next();
+                    }
+                },
+                else => {
+                    const expr = self.parseExpr();
+                
+                    // Only var_decl, function & struct declaration allowed inside struct
+                    switch (expr.value) {
+                        ast.Kind.var_decl,
+                        ast.Kind.fn_decl,
+                        ast.Kind.struct_decl => {},
+                        else => {
+                            self.reporter.reportErrorAtSpan(expr.span, "Only function & struct declaration allowed inside struct", .{});
+                        }
+                    }
+                    
+                    members.append(self.temp_allocator, expr) catch unreachable;
+                },
+            }
+        }
+        
+        const close_bracket_token = self.ts.nextExpect(.CloseCurlyBracket);
+        
+        return .{
+            .span = TokenSpan.from_tokens(pub_token orelse struct_token, close_bracket_token),
+            .value = .{.struct_decl = .{
+                .is_public = pub_token != null,
+                .name = name_token,
+                .fields = self.collectAndFreeTempList(ast.StructField, &fields),
+                .members = self.collectAndFreeTempList(ast.Expr, &members),
+            }},
+        };
+    }
+    
+    fn parseEnumDecl(self: *Parser) ast.Expr {
+        var pub_token: ?Token = null;
+        
+        if (self.ts.peek().kind == .KeywordPub) {
+            pub_token = self.ts.next();
+        }
+        
+        const enum_token = self.ts.nextExpect(.KeywordEnum);
+        const name_token = self.ts.nextExpect(.Identifier);
+        
+        _ = self.ts.nextExpect(.OpenCurlyBracket);
+        
+        var items = std.ArrayList(Token).empty;
+        var members = std.ArrayList(ast.Expr).empty;
+        var has_comma = true;
+        var items_done = false;
+        
+        while (self.ts.hasNext()) {
+            switch (self.ts.peek().kind) {
+                TokenKind.CloseCurlyBracket => break,
+                TokenKind.KeywordFn => items_done = true,
+                TokenKind.KeywordPub => {
+                    if (self.hasFnNext()) {
+                        items_done = true;
+                    }
+                    else {
+                        self.reporter.reportErrorAtToken(self.ts.peekN(2), "Invalid pub modifier", .{});
                     }
                 },
                 
                 else => {}
             }
             
-            if (!fields_done) {
-                if (!has_comma and !self.ts.peek().has_nl_before) {
-                    self.reporter.reportErrorAfterToken(self.ts.current(), "Expected comma or newline");
+            if (!items_done) {
+                if (!has_comma) {
+                    self.reporter.reportErrorAfterToken(self.ts.current(), "Expected comma", .{});
                 }
                 
-                const field_name_token = self.ts.nextExpect(.Identifier);
-                var field_typ: ?ast.Type = null;
-                var field_default_value: ?*ast.Expr = null;
-                
-                if (self.ts.peek().kind == .Colon) {
-                    _ = self.ts.next();
-                    field_typ = self.parseType();
-                }
-                
-                if (self.ts.peek().kind == .Eq) {
-                    _ = self.ts.next();
-                    field_default_value = self.makeExprPointer(self.parseExpr());
-                }
-                
-                if (field_typ == null and field_default_value == null) {
-                    self.reporter.reportErrorAtToken(field_name_token, "Expected type or default value");
-                }
-                
-                fields.append(self.temp_allocator, ast.StructField{
-                    .name = field_name_token,
-                    .typ = field_typ,
-                    .default_value = field_default_value,
-                }) catch unreachable;
+                items.append(self.temp_allocator, self.ts.nextExpect(.Identifier)) catch unreachable;
                 
                 if (self.ts.peek().kind == .Comma) {
                     _ = self.ts.next();
@@ -641,10 +763,9 @@ const Parser = struct {
                 
                 // Only function & struct declaration allowed inside struct
                 switch (expr.value) {
-                    ast.Kind.fn_decl,
-                    ast.Kind.struct_decl => {},
+                    ast.Kind.fn_decl => {},
                     else => {
-                        self.reporter.reportErrorAtSpan(expr.span, "Only function & struct declaration allowed inside struct");
+                        self.reporter.reportErrorAtSpan(expr.span, "Only function declaration allowed inside enum", .{});
                     }
                 }
                 
@@ -652,14 +773,14 @@ const Parser = struct {
             }
         }
         
-        const close_bracket_token = self.ts.nextExpect(.CloseCurlyBracket);
+        const close_curly_token = self.ts.nextExpect(.CloseCurlyBracket);
         
         return .{
-            .span = TokenSpan.from_tokens(pub_token orelse struct_token, close_bracket_token),
-            .value = .{.struct_decl = .{
+            .span = TokenSpan.from_tokens(pub_token orelse enum_token, close_curly_token),
+            .value = .{.enum_decl = .{
                 .is_public = pub_token != null,
                 .name = name_token,
-                .fields = self.collectAndFreeTempList(ast.StructField, &fields),
+                .items = self.collectAndFreeTempList(Token, &items),
                 .members = self.collectAndFreeTempList(ast.Expr, &members),
             }},
         };
@@ -688,7 +809,7 @@ const Parser = struct {
         }
         
         if (typ == null and value == null) {
-            self.reporter.reportErrorAtToken(name_token, "Variable should have a type or value");
+            self.reporter.reportErrorAtToken(name_token, "Variable should have a type or value", .{});
         }
         
         return .{
@@ -725,6 +846,7 @@ const Parser = struct {
         const for_token = self.ts.nextExpect(.KeywordFor);
         var item_var_token: ?Token = null;
         var index_var_token: ?Token = null;
+        var is_reference = false;
         
         // If for format is
         //     for a in x {}
@@ -732,6 +854,23 @@ const Parser = struct {
         //     for a, i in x {}
         //
         if (self.ts.peek().kind == .Identifier and (self.ts.peekN(2).kind == .Comma or self.ts.peekN(2).kind == .KeywordIn)) {
+            item_var_token = self.ts.next();
+            
+            if (self.ts.peek().kind == .Comma) {
+                _ = self.ts.next();
+                index_var_token = self.ts.nextExpect(.Identifier);
+            }
+            
+            _ = self.ts.nextExpect(.KeywordIn);
+        }
+        // If for format is
+        //     for &a in x {}
+        // or
+        //     for &a, i in x {}
+        //
+        else if (self.ts.peek().kind == .And and self.ts.peekN(2).kind == .Identifier and (self.ts.peekN(3).kind == .Comma or self.ts.peekN(3).kind == .KeywordIn)) {
+            _ = self.ts.next();
+            is_reference = true;
             item_var_token = self.ts.next();
             
             if (self.ts.peek().kind == .Comma) {
@@ -753,6 +892,7 @@ const Parser = struct {
             .value = .{.forr = .{
                 .item_var = item_var_token,
                 .index_var = index_var_token,
+                .is_reference = is_reference,
                 .iter = iter,
                 .body = body,
             }},
@@ -825,7 +965,7 @@ const Parser = struct {
         
         while (self.ts.peek().kind != .CloseParen) {
             if (!has_comma) {
-                self.reporter.reportErrorAtToken(self.ts.current(), "Expected comma");
+                self.reporter.reportErrorAtToken(self.ts.current(), "Expected comma", .{});
             }
             
             args.append(self.temp_allocator, self.parseExpr()) catch unreachable;
@@ -907,7 +1047,7 @@ const Parser = struct {
         
         while (self.ts.peek().kind != .CloseSqBracket) {
             if (!has_comma) {
-                self.reporter.reportErrorAfterToken(self.ts.current(), "Expected comma");
+                self.reporter.reportErrorAfterToken(self.ts.current(), "Expected comma", .{});
             }
             
             elems.append(self.temp_allocator, self.parseExpr()) catch unreachable;
@@ -943,7 +1083,7 @@ const Parser = struct {
         
         while (self.ts.peek().kind != .CloseCurlyBracket) {
             if (!has_comma) {
-                self.reporter.reportErrorAfterToken(self.ts.current(), "Expected comma");
+                self.reporter.reportErrorAfterToken(self.ts.current(), "Expected comma", .{});
             }
             
             // Struct field initialization can be named or unnamed
@@ -994,6 +1134,22 @@ const Parser = struct {
         };
     }
     
+    fn parseEnumValue(self: *Parser) ast.Expr {
+        var enum_name_token: ?Token = null;
+        
+        if (self.ts.peek().kind == .Identifier) {
+            enum_name_token = self.ts.next();
+        }
+        
+        const dot_token = self.ts.nextExpect(.Dot);
+        const item_token = self.ts.nextExpect(.Identifier);
+        
+        return .{
+            .span = TokenSpan.from_tokens(enum_name_token orelse dot_token, item_token),
+            .value = .{ .enum_value = .{ .item = item_token } },
+        };
+    }
+    
     fn parseExtern(self: *Parser) ast.Extern {
         const extern_token = self.ts.nextExpect(.KeywordExtern);
         var close_token: ?Token = null;
@@ -1013,7 +1169,7 @@ const Parser = struct {
                 }
                 
                 if (!has_comma) {
-                    self.reporter.reportErrorAfterToken(self.ts.current(), "Expected comma");
+                    self.reporter.reportErrorAfterToken(self.ts.current(), "Expected comma", .{});
                 }
                 
                 const ident = self.ts.nextExpect(.Identifier);
@@ -1045,6 +1201,31 @@ const Parser = struct {
         };
     }
     
+    fn parseAddressOf(self: *Parser) ast.Expr {
+        const and_token = self.ts.nextExpect(.And);
+        const value = self.parseExpr();
+        
+        return .{
+            .span = TokenSpan.from_token_and_span(and_token, value.span),
+            .value = .{.address_of = .{
+                .value = self.makeExprPointer(value),
+            }},
+        };
+    }
+    
+    fn parseCast(self: *Parser, expr: ast.Expr) ast.Expr {
+        _ = self.ts.nextExpect(.KeywordAs);
+        const typ = self.parseType();
+        
+        return .{
+            .span = TokenSpan.from_spans(expr.span, typ.span),
+            .value = .{.cast = .{
+                .typ = typ,
+                .value = self.makeExprPointer(expr),
+            }},
+        };
+    }
+    
     fn parseType(self: *Parser) ast.Type {
         var typ: ast.Type = undefined;
         
@@ -1062,7 +1243,7 @@ const Parser = struct {
                         if (self.ts.peek().kind == .Gt) break;
                         
                         if (!has_comma) {
-                            self.reporter.reportErrorAtToken(self.ts.current(), "Expected comma");
+                            self.reporter.reportErrorAtToken(self.ts.current(), "Expected comma", .{});
                         }
                         
                         children.append(self.temp_allocator, self.parseType()) catch unreachable;
@@ -1177,7 +1358,7 @@ const Parser = struct {
                     if (self.ts.peek().kind == .CloseParen) break;
                     
                     if (!has_comma) {
-                        self.reporter.reportErrorAtToken(self.ts.current(), "Expected comma");
+                        self.reporter.reportErrorAtToken(self.ts.current(), "Expected comma", .{});
                     }
                     
                     children.append(self.temp_allocator, self.parseType()) catch unreachable;
@@ -1205,7 +1386,7 @@ const Parser = struct {
             },
             
             else => {
-                self.reporter.reportErrorAtTokenArgs(self.ts.next(), "Expected type but got {s}", .{@tagName(self.ts.current().kind)});
+                self.reporter.reportErrorAtToken(self.ts.next(), "Expected type but got {s}", .{@tagName(self.ts.current().kind)});
             }
         }
         
@@ -1227,7 +1408,7 @@ const Parser = struct {
             
             while (self.ts.peek().kind != .CloseCurlyBracket) {
                 if (!has_comma) {
-                    self.reporter.reportErrorAtToken(self.ts.current(), "Expected comma");
+                    self.reporter.reportErrorAtToken(self.ts.current(), "Expected comma", .{});
                 }
                 
                 tokens.append(self.temp_allocator, self.ts.nextExpect(.Identifier)) catch unreachable;

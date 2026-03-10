@@ -21,6 +21,7 @@ pub const TokenKind = enum(u16) {
     KeywordElse,
     KeywordPub,
     KeywordStruct,
+    KeywordEnum,
     KeywordInterface,
     KeywordImport,
     KeywordAs,
@@ -145,17 +146,17 @@ pub const Token = struct {
         };
     }
     
-    pub fn print(self: Token, file_manager: *const FileManager) void {
+    pub fn print(self: Token, writer: *std.Io.Writer, file_manager: *const FileManager) void {
         const filename = file_manager.getFilename(self.loc.file_id);
         const src = file_manager.getContent(self.loc.file_id);
         
-        std.debug.print("{s}:{d}:{d} => {s} '{s}'\n", .{
+        writer.print("{s}:{d}:{d} => {s} '{s}'\n", .{
             filename,
             self.loc.line,
             self.loc.col,
             @tagName(self.kind),
             src[self.loc.index..(self.loc.index + self.loc.len)],
-        });
+        }) catch unreachable;
     }
 };
 

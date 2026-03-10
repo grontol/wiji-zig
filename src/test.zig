@@ -38,6 +38,7 @@ pub fn main() !void {
     try collectTest(allocator, "tests/1_lexer", .lexer, &entries);
     try collectTest(allocator, "tests/2_parser", .parser, &entries);
     try collectTest(allocator, "tests/3_typer", .typer, &entries);
+    try collectTest(allocator, "tests/6_output", .run_output, &entries);
     
     std.mem.sort(TestEntry, entries.items, {}, struct {
         fn lessThan(_: void, a: TestEntry, b: TestEntry) bool {
@@ -163,15 +164,13 @@ fn runTest(allocator: std.mem.Allocator, exe_path: []const u8, entry: TestEntry)
     try cmd.append(allocator, entry.path);
     
     switch (entry.kind) {
-        .lexer  => { try cmd.appendSlice(allocator, &[_][]const u8{"--emit", "token"}); },
-        .parser => { try cmd.appendSlice(allocator, &[_][]const u8{"--emit", "ast"}); },
-        .typer  => { try cmd.appendSlice(allocator, &[_][]const u8{"--emit", "tast"}); },
-        else => {
-            std.debug.panic("TODO: test not implemented {s}", .{@tagName(entry.kind)});
-        }
+        .lexer      => { try cmd.appendSlice(allocator, &[_][]const u8{"--emit", "token"}); },
+        .parser     => { try cmd.appendSlice(allocator, &[_][]const u8{"--emit", "ast"}); },
+        .typer      => { try cmd.appendSlice(allocator, &[_][]const u8{"--emit", "tast"}); },
+        .run_output => { try cmd.appendSlice(allocator, &[_][]const u8{"--run"}); },
     }
     
-    try cmd.appendSlice(allocator, &[_][]const u8{"-err", "minimal"});
+    try cmd.appendSlice(allocator, &[_][]const u8{"--err", "minimal"});
     
     var proc = std.process.Child.init(cmd.items, allocator);
     proc.stdout_behavior = .Pipe;
@@ -186,12 +185,12 @@ fn runTest(allocator: std.mem.Allocator, exe_path: []const u8, entry: TestEntry)
     try proc.collectOutput(allocator, &stdout, &stderr, 1024 * 1024);
     _ = try proc.wait();
     
-    if (std.mem.eql(u8, stderr.items, expected)) {
+    if (std.mem.eql(u8, stdout.items, expected)) {
         return .success;
     }
-    else {
+    else {        
         std.debug.print(ANSI_RED ++ "\n\nExpected:\n{s}", .{if (expected.len > 0) expected else "\n"});
-        std.debug.print("\nActual:\n{s}" ++ ANSI_RESET, .{stderr.items});
+        std.debug.print("\nActual:\n{s}" ++ ANSI_RESET, .{stdout.items});
         
         return .failed;
     }

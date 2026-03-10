@@ -14,18 +14,24 @@ const TypedSymbol = @import("symbol.zig").TypedSymbol;
 const SymbolManager = @import("symbol.zig").SymbolManager;
 const FileManager = @import("file_manager.zig");
 
+const ScopeMode = enum {
+    module,
+    container,
+    local,
+};
+
 const Scope = struct {
     parent: ?*Scope,
     syms: std.StringHashMap(TypedSymbol),
     allocator: std.mem.Allocator,
-    is_top_level: bool,
+    mode: ScopeMode,
     
-    fn init(allocator: std.mem.Allocator, is_top_level: bool) Scope {
+    fn init(allocator: std.mem.Allocator, mode: ScopeMode) Scope {
         return .{
             .parent = null,
             .syms = std.StringHashMap(TypedSymbol).init(allocator),
             .allocator = allocator,
-            .is_top_level = is_top_level,
+            .mode = mode,
         };
     }
     
@@ -38,7 +44,16 @@ const Scope = struct {
             .parent = self,
             .syms = std.StringHashMap(TypedSymbol).init(self.allocator),
             .allocator = self.allocator,
-            .is_top_level = false,
+            .mode = self.mode,
+        };
+    }
+    
+    fn inheritWithMode(self: *Scope, mode: ScopeMode) Scope {
+        return .{
+            .parent = self,
+            .syms = std.StringHashMap(TypedSymbol).init(self.allocator),
+            .allocator = self.allocator,
+            .mode = mode,
         };
     }
     
@@ -65,13 +80,32 @@ const Scope = struct {
         const typed_symbol = TypedSymbol{
             .symbol = symbol,
             .typ = typ,
+            .child_symbols = null,
         };
         
         self.syms.put(key, typed_symbol) catch unreachable;
     }
     
+    fn setChildSymbols(self: *Scope, key: []const u8, child_symbols: *std.StringHashMap(TypedSymbol)) void {
+        const symbol = self.syms.getPtr(key);
+        
+        if (symbol) |sym| {
+            sym.child_symbols = child_symbols;
+        }
+        else {
+            std.debug.panic("Scope doesn't have symbol `{s}`", .{key});
+        }
+    }
+    
     fn setTypedSymbol(self: *Scope, key: []const u8, typed_symbol: TypedSymbol) void {
         self.syms.put(key, typed_symbol) catch unreachable;
+    }
+    
+    fn makeChildSymbols(self: *Scope, allocator: std.mem.Allocator) *std.StringHashMap(TypedSymbol) {
+        const child_symbol = allocator.create(std.StringHashMap(TypedSymbol)) catch unreachable;
+        child_symbol.* = self.syms.cloneWithAllocator(allocator) catch unreachable;
+        
+        return child_symbol;
     }
 };
 
@@ -115,6 +149,7 @@ const Typer = struct {
     symbol_manager: *SymbolManager,
     children: *const std.StringHashMap(*tast.Module),
     
+    var_decls: std.ArrayList(tast.VarDecl) = .empty,
     fn_decls: std.ArrayList(tast.FnDecl) = .empty,
     
     cur_fn: ?*tast.FnDecl = null,
@@ -139,20 +174,17 @@ const Typer = struct {
         };
     }
     
-    fn appendFnDecl(self: *Typer, fn_decl: tast.FnDecl) void {
-        self.fn_decls.append(self.allocator, fn_decl) catch unreachable;
-    }
-    
-    fn typeModule(self: *Typer, scope: *Scope, module: *const ast.Module, module_id: usize) tast.Module {
+    fn typeModule(self: *Typer, scope: *Scope, module: *const ast.Module, module_id: usize, module_name: []const u8) tast.Module {
         self.fn_decls.clearAndFree(self.allocator);
         
+        self.symbol_manager.pushNamespace(module_name);
         const stmts = self.typeStmts(scope, module.exprs);
-        var var_decls = std.ArrayList(tast.VarDecl).initCapacity(self.allocator, stmts.len) catch unreachable;
+        self.symbol_manager.popNamespace();
         
         for (stmts) |stmt| {
             switch (stmt) {
                 .noop => {},
-                .var_decl => |var_decl| { var_decls.appendAssumeCapacity(var_decl); },
+                .var_decl => |var_decl| { self.var_decls.append(self.allocator, var_decl) catch unreachable; },
                 else => {
                     std.debug.panic("UNREACHABLE: {s}", .{@tagName(stmt)});
                     
@@ -178,7 +210,7 @@ const Typer = struct {
         
         return .{
             .id = module_id,
-            .var_decls = var_decls.items,
+            .var_decls = self.var_decls.items,
             .fn_decls = self.fn_decls.items,
             .public_symbols = public_symbols,
             .children = children.items,
@@ -190,18 +222,35 @@ const Typer = struct {
         
         var fn_decls = std.ArrayList(tast.FnDecl).empty;
         defer fn_decls.clearAndFree(self.temp_allocator);
-        
         var fn_decl_indices = std.ArrayList(usize).empty;
         defer fn_decl_indices.clearAndFree(self.temp_allocator);
         
+        var struct_decls = std.ArrayList(*Type).empty;
+        defer struct_decls.clearAndFree(self.temp_allocator);
+        var struct_decl_indices = std.ArrayList(usize).empty;
+        defer struct_decl_indices.clearAndFree(self.temp_allocator);
+        
+        var enum_decls = std.ArrayList(*Type).empty;
+        defer enum_decls.clearAndFree(self.temp_allocator);
+        var enum_decl_indices = std.ArrayList(usize).empty;
+        defer enum_decl_indices.clearAndFree(self.temp_allocator);
+        
         for (exprs, 0..) |expr, i| {
             switch (expr.value) {
+                ast.Kind.import => |imp| {
+                    self.typeImport(scope, &imp);
+                },
                 ast.Kind.fn_decl => |fn_decl| {
-                    fn_decls.append(self.temp_allocator, self.typeFnDecl(scope, &fn_decl)) catch unreachable;
+                    fn_decls.append(self.temp_allocator, self.typeFnDecl(scope, &fn_decl, null)) catch unreachable;
                     fn_decl_indices.append(self.temp_allocator, i) catch unreachable;
                 },
                 ast.Kind.struct_decl => |struct_decl| {
-                    self.typeStructDecl(scope, &struct_decl);
+                    struct_decls.append(self.temp_allocator, self.typeStructDecl(scope, &struct_decl)) catch unreachable;
+                    struct_decl_indices.append(self.temp_allocator, i) catch unreachable;
+                },
+                ast.Kind.enum_decl => |enum_decl| {
+                    enum_decls.append(self.temp_allocator, self.typeEnumDecl(scope, &enum_decl)) catch unreachable;
+                    enum_decl_indices.append(self.temp_allocator, i) catch unreachable;
                 },
                 else => {}
             }
@@ -209,36 +258,48 @@ const Typer = struct {
         
         for (exprs) |expr| {
             switch (expr.value) {
+                ast.Kind.import,
                 ast.Kind.fn_decl,
-                ast.Kind.struct_decl => {},
+                ast.Kind.struct_decl,
+                ast.Kind.enum_decl => {},
                 else => {
+                    const stmt = self.typeStmt(scope, &expr, false);
+                    
                     switch (expr.value) {
                         ast.Kind.var_decl => {},
                         ast.Kind.import => {},
                         
                         else => {
-                            if (scope.is_top_level) {
-                                self.reporter.reportErrorAtSpan(expr.span, "This kind of statement cannot be placed at top level");
+                            if (scope.mode == .module) {
+                                self.reporter.reportErrorAtSpan(expr.span, "This kind of statement cannot be placed at top level", .{});
                             }
                         },
                     }
                     
-                    stmts.append(self.temp_allocator, self.typeStmt(scope, &expr)) catch unreachable;
+                    stmts.append(self.temp_allocator, stmt) catch unreachable;
                 }
             }
+        }
+        
+        for (struct_decls.items, struct_decl_indices.items) |struct_typ, i| {
+            self.typeStructDeclMember(scope, &exprs[i].value.struct_decl, struct_typ);
+        }
+        
+        for (enum_decls.items, enum_decl_indices.items) |enum_typ, i| {
+            self.typeEnumDeclMember(scope, &exprs[i].value.enum_decl, enum_typ);
         }
         
         for (fn_decls.items, fn_decl_indices.items) |*fn_decl, i| {
             if (exprs[i].value.fn_decl.body) |_| {
                 if (fn_decl.is_extern) {
-                    self.reporter.reportErrorAtSpan(exprs[i].span, "extern function cannot have a body");
+                    self.reporter.reportErrorAtSpan(exprs[i].span, "extern function cannot have a body", .{});
                 }
                 
                 self.typeFnDeclBody(scope, &exprs[i].value.fn_decl, fn_decl);
             }
             else {
                 if (!fn_decl.is_extern) {
-                    self.reporter.reportErrorAtSpan(exprs[i].span, "Non extern function must have a body");
+                    self.reporter.reportErrorAtSpan(exprs[i].span, "Non extern function must have a body", .{});
                 }
             }
         }
@@ -248,7 +309,7 @@ const Typer = struct {
         return self.collectAndFreeTempList(tast.Stmt, &stmts);
     }
     
-    fn typeStmt(self: *Typer, scope: *Scope, stmt: *const ast.Expr) tast.Stmt {
+    fn typeStmt(self: *Typer, scope: *Scope, stmt: *const ast.Expr, dont_create_new_scope: bool) tast.Stmt {
         switch (stmt.value) {
             .var_decl   => |decl|   { return self.typeVarDecl(scope, &decl, stmt.span); },
             .assignment => |ass|    { return self.typeAssignment(scope, &ass); },
@@ -257,8 +318,7 @@ const Typer = struct {
             .iff        => |iff|    { return self.typeIf(scope, &iff); },
             .whil       => |whil|   { return self.typeWhile(scope, &whil); },
             .forr       => |forr|   { return self.typeFor(scope, &forr); },
-            .block      => |block|  { return self.typeBlockStmt(scope, &block); },
-            .import     => |import| { return self.typeImport(scope, &import); },
+            .block      => |block|  { return self.typeBlockStmt(scope, &block, dont_create_new_scope); },
             
             else => {
                 if (stmt.canBeUsedAsExpr()) {
@@ -272,11 +332,11 @@ const Typer = struct {
         }
     }
     
-    fn typeFnDecl(self: *Typer, scope: *Scope, fn_decl: *const ast.FnDecl) tast.FnDecl {
+    fn typeFnDecl(self: *Typer, scope: *Scope, fn_decl: *const ast.FnDecl, out_typ: ?**const Type) tast.FnDecl {
         const fn_name = self.getTokenText(fn_decl.name);
         
         if (scope.hasSelf(fn_name)) {
-            self.reporter.reportErrorAtTokenArgs(fn_decl.name, "Symbol '{s}' is already defined", .{fn_name});
+            self.reporter.reportErrorAtToken(fn_decl.name, "Symbol `{s}` is already defined", .{fn_name});
         }
         
         var params = std.ArrayList(tast.FnParam).initCapacity(self.allocator, fn_decl.params.len) catch unreachable;
@@ -302,13 +362,14 @@ const Typer = struct {
                         const expected_str = param_typ.getTextLeak(self.temp_allocator);
                         const actual_str = default_type.getTextLeak(self.temp_allocator);
                         
-                        self.reporter.reportErrorAtSpanArgs(def_value.span, "Expected '{s}' but got '{s}'", .{expected_str, actual_str});
+                        self.reporter.reportErrorAtSpan(def_value.span, "Expected `{s}` but got `{s}`", .{expected_str, actual_str});
                     }
                 }
                 else if (has_default) {
                     self.reporter.reportErrorAtSpan(
                         TokenSpan.from_token_and_span(param.name, typ.span),
                         "Param with no default value cannot be placed after param with default value",
+                        .{}
                     );
                 }
             }
@@ -324,16 +385,16 @@ const Typer = struct {
             
             if (param.is_variadic) {
                 if (is_variadic) {
-                    self.reporter.reportErrorAtToken(param.name, "Cannot have more that one variadic param");
+                    self.reporter.reportErrorAtToken(param.name, "Cannot have more that one variadic param", .{});
                 }
                 
                 is_variadic = true;
             }
             else if (is_variadic) {
-                self.reporter.reportErrorAtToken(param.name, "Non variadic param cannot be placed after variadic param");
+                self.reporter.reportErrorAtToken(param.name, "Non variadic param cannot be placed after variadic param", .{});
             }
             
-            const symbol = self.symbol_manager.createSymbol(self.getTokenText(param.name));
+            const symbol = self.symbol_manager.createSymbol(self.getTokenText(param.name), false);
             
             params.appendAssumeCapacity(tast.FnParam{
                 .name = symbol,
@@ -348,16 +409,20 @@ const Typer = struct {
             return_typ = self.typeType(scope, &typ);
         }
         
-        const fn_name_symbol = self.symbol_manager.createSymbol(fn_name);
-        scope.set(
-            fn_name, fn_name_symbol,
-            self.type_manager.createFn(
-                param_types.items,
-                return_typ,
-                is_variadic,
-                false,
-            )
+        const namespaced = if (fn_decl.is_extern or scope.mode == .module and std.mem.eql(u8, fn_name, "main")) false else true;
+        const fn_name_symbol = self.symbol_manager.createSymbol(fn_name, namespaced);
+        const fn_typ = self.type_manager.createFn(
+            param_types.items,
+            return_typ,
+            is_variadic,
+            false,
         );
+        
+        scope.set(fn_name, fn_name_symbol, fn_typ);
+        
+        if (out_typ) |typ| {
+            typ.* = fn_typ;
+        }
         
         return .{
             .is_extern = fn_decl.is_extern,
@@ -372,7 +437,7 @@ const Typer = struct {
     }
     
     fn typeFnDeclBody(self: *Typer, scope: *Scope, fn_decl_ast: *const ast.FnDecl, forward_decl: *tast.FnDecl) void {        
-        var new_scope = scope.inherit();
+        var new_scope = scope.inheritWithMode(.local);
         defer new_scope.deinit();
         
         for (forward_decl.params) |param| {
@@ -382,26 +447,26 @@ const Typer = struct {
         const parent_fn = self.cur_fn;
         self.cur_fn = forward_decl;
         
-        forward_decl.body = self.typeBlock(&new_scope, &fn_decl_ast.body.?);
+        forward_decl.body = self.typeBlock(&new_scope, &fn_decl_ast.body.?, true);
         
         if (forward_decl.return_typ.kind != types.TypeKind.void) {
             if (!doesAllPathHasReturn(&forward_decl.body.?)) {
-                self.reporter.reportErrorAtSpan(fn_decl_ast.return_typ.?.span, "Not all path has return value");
+                self.reporter.reportErrorAtSpan(fn_decl_ast.return_typ.?.span, "Function must have return value in all paths", .{});
             }
         }
         
         self.cur_fn = parent_fn;
     }
     
-    fn typeBlockStmt(self: *Typer, scope: *Scope, block: *const ast.Block) tast.Stmt {
+    fn typeBlockStmt(self: *Typer, scope: *Scope, block: *const ast.Block, dont_create_new_scope: bool) tast.Stmt {
         return .{
-            .block = self.typeBlock(scope, block),
+            .block = self.typeBlock(scope, block, dont_create_new_scope),
         };
     }
     
     fn typeBlockExpr(self: *Typer, scope: *Scope, block: *const ast.Block, span: TokenSpan) tast.Expr {
         if (block.exprs.len == 0) {
-            self.reporter.reportErrorAtSpan(span, "Block should have an expression");
+            self.reporter.reportErrorAtSpan(span, "Block should have an expression", .{});
         }
         
         // TODO: Handle edge cases like:
@@ -411,7 +476,7 @@ const Typer = struct {
         const stmts = self.typeStmts(scope, block.exprs);
         
         if (stmts.len == 0) {
-            self.reporter.reportErrorAtSpan(span, "Struct or function declaration cannot be the only statement in a block expression");
+            self.reporter.reportErrorAtSpan(span, "Struct or function declaration cannot be the only statement in a block expression", .{});
         }
         
         const last_stmt = stmts[stmts.len - 1];
@@ -434,7 +499,7 @@ const Typer = struct {
                 }
             }
             
-            self.reporter.reportErrorAtSpan(last_stmt_span, "Statement cannot be used as expression");
+            self.reporter.reportErrorAtSpan(last_stmt_span, "Statement cannot be used as expression", .{});
         }
         
         return .{
@@ -446,21 +511,28 @@ const Typer = struct {
         };
     }
     
-    fn typeBlock(self: *Typer, scope: *Scope, block: *const ast.Block) tast.Block {
+    fn typeBlock(self: *Typer, scope: *Scope, block: *const ast.Block, dont_create_new_scope: bool) tast.Block {
+        var new_scope: ?Scope = if (dont_create_new_scope) null else scope.inherit();
+        
+        const stmts = self.typeStmts(if (new_scope) |*sc| sc else scope, block.exprs);
+        
+        if (new_scope) |*sc| {
+            sc.deinit();
+        }
+        
         return .{
-            .stmts = self.typeStmts(scope, block.exprs),
+            .stmts = stmts,
         };
     }
     
-    fn typeStructDecl(self: *Typer, scope: *Scope, decl: *const ast.StructDecl) void {
+    fn typeStructDecl(self: *Typer, scope: *Scope, decl: *const ast.StructDecl) *Type {
         const struct_name = self.getTokenText(decl.name);
-        const struct_symbol = self.symbol_manager.createSymbol(struct_name);
+        const struct_symbol = self.symbol_manager.createSymbol(struct_name, true);
         
-        var fields = std.ArrayList(types.TypeStructField)
-            .initCapacity(self.allocator, decl.fields.len) catch unreachable;
+        var fields = std.ArrayList(types.TypeStructField).initCapacity(self.allocator, decl.fields.len) catch unreachable;
         
         for (decl.fields) |field| {
-            const field_name_symbol = self.symbol_manager.createSymbol(self.getTokenText(field.name));
+            const field_name_symbol = self.symbol_manager.createSymbol(self.getTokenText(field.name), false);
             var field_typ: *const Type = undefined;
             var field_default_value: ?*tast.Expr = null;
             var has_type = false;
@@ -478,7 +550,7 @@ const Typer = struct {
                         const expected_str = field_typ.getTextLeak(self.temp_allocator);
                         const actual_str = field_default_value.?.typ.getTextLeak(self.temp_allocator);
                         
-                        self.reporter.reportErrorAtSpanArgs(def_value.span, "Expected '{s}' but got '{s}'", .{expected_str, actual_str});
+                        self.reporter.reportErrorAtSpan(def_value.span, "Expected `{s}` but got `{s}`", .{expected_str, actual_str});
                     }
                 }
                 else {
@@ -498,16 +570,135 @@ const Typer = struct {
             });
         }
         
-        const struct_type = self.type_manager.createStruct(struct_symbol, fields.items);
-        scope.set(struct_name, struct_symbol, struct_type);
+        const struct_type = self.type_manager.createStruct(
+            struct_symbol,
+            fields.items,
+            &.{},
+        );
         
-        var child_scope = scope.inherit();
-        defer child_scope.deinit();
+        const struct_type_container = self.type_manager.createType(struct_type);
         
-        self.symbol_manager.pushNamespace(struct_symbol);
-        // std.debug.panic("TODO: typeStructDecl members", .{});
-        // _ = self.typeStmts(&child_scope, decl.members);
+        scope.set(struct_name, struct_symbol, struct_type_container);
+        
+        return struct_type;
+    }
+    
+    fn typeStructDeclMember(self: *Typer, scope: *Scope, decl: *const ast.StructDecl, struct_typ: *Type) void {
+        self.symbol_manager.pushNamespace(self.getTokenText(decl.name));
+        
+        var new_scope = scope.inheritWithMode(.container);
+        defer new_scope.deinit();
+        
+        var methods = std.ArrayList(types.TypeMethod).empty;
+        var fn_decls = std.ArrayList(tast.FnDecl).empty;
+        var fn_decl_ast_indices = std.ArrayList(usize).empty;
+        defer fn_decl_ast_indices.clearAndFree(self.temp_allocator);
+        
+        for (decl.members, 0..) |mem, i| {
+            switch (mem.value) {
+                .var_decl => |var_decl| {
+                    const tast_var_decl = self.typeVarDecl(&new_scope, &var_decl, mem.span);
+                    std.debug.assert(tast_var_decl == .var_decl);
+                    
+                    self.var_decls.append(self.allocator, tast_var_decl.var_decl) catch unreachable;
+                },
+                .fn_decl => |fn_decl| {
+                    var fn_typ: *const Type = undefined;
+                    const tast_fn_decl = self.typeFnDecl(&new_scope, &fn_decl, &fn_typ);
+                    
+                    if (fn_typ.value.func.params.len > 0 and fn_typ.value.func.params[0].isSameOrSameReference(struct_typ)) {
+                        methods.append(self.temp_allocator, .{
+                            .name = tast_fn_decl.name,
+                            .typ = fn_typ,
+                        }) catch unreachable;
+                    }
+                    
+                    fn_decls.append(self.temp_allocator, tast_fn_decl) catch unreachable;
+                    fn_decl_ast_indices.append(self.temp_allocator, i) catch unreachable;
+                },
+                
+                else => {
+                    self.reporter.reportErrorAtSpan(mem.span, "Invalid struct member", .{});
+                }
+            }
+        }
+        
+        struct_typ.value.@"struct".methods = self.collectAndFreeTempList(types.TypeMethod, &methods);
+        
+        for (0..fn_decls.items.len) |i| {
+            self.typeFnDeclBody(&new_scope, &decl.members[fn_decl_ast_indices.items[i]].value.fn_decl, &fn_decls.items[i]);
+        }
+        
+        self.fn_decls.appendSlice(self.allocator, self.collectAndFreeTempList(tast.FnDecl, &fn_decls)) catch unreachable;
+        
+        scope.setChildSymbols(struct_typ.value.@"struct".name.text, new_scope.makeChildSymbols(self.allocator));
+        
         self.symbol_manager.popNamespace();
+    }
+    
+    fn typeEnumDecl(self: *Typer, scope: *Scope, decl: *const ast.EnumDecl) *Type {
+        const enum_name = self.getTokenText(decl.name);
+        const enum_symbol = self.symbol_manager.createSymbol(enum_name, true);
+        
+        var items = std.ArrayList(Symbol).initCapacity(self.allocator, decl.items.len) catch unreachable;
+            
+        for (decl.items) |item| {
+            const item_name_symbol = self.symbol_manager.createSymbol(self.getTokenText(item), false);
+            items.appendAssumeCapacity(item_name_symbol);
+        }
+        
+        const enum_type = self.type_manager.createEnum(
+            enum_symbol,
+            items.items,
+            &.{},
+        );
+        
+        const enum_type_container = self.type_manager.createType(enum_type);
+        
+        scope.set(enum_name, enum_symbol, enum_type_container);
+        
+        return enum_type;
+    }
+    
+    fn typeEnumDeclMember(self: *Typer, scope: *Scope, decl: *const ast.EnumDecl, enum_typ: *Type) void {
+        var new_scope = scope.inherit();
+        defer new_scope.deinit();
+        
+        var methods = std.ArrayList(types.TypeMethod).empty;
+        var fn_decls = std.ArrayList(tast.FnDecl).empty;
+        var fn_decl_ast_indices = std.ArrayList(usize).empty;
+        defer fn_decl_ast_indices.clearAndFree(self.temp_allocator);
+        
+        for (decl.members, 0..) |mem, i| {
+            switch (mem.value) {
+                .fn_decl => |fn_decl| {
+                    var fn_typ: *const Type = undefined;
+                    const tast_fn_decl = self.typeFnDecl(&new_scope, &fn_decl, &fn_typ);
+                    
+                    if (fn_typ.value.func.params.len > 0 and fn_typ.value.func.params[0].isSameOrSameReference(enum_typ)) {
+                        methods.append(self.temp_allocator, .{
+                            .name = tast_fn_decl.name,
+                            .typ = fn_typ,
+                        }) catch unreachable;
+                    }
+                    
+                    fn_decls.append(self.temp_allocator, tast_fn_decl) catch unreachable;
+                    fn_decl_ast_indices.append(self.temp_allocator, i) catch unreachable;
+                },
+                
+                else => {
+                    self.reporter.reportErrorAtSpan(mem.span, "Invalid struct member", .{});
+                }
+            }
+        }
+        
+        enum_typ.value.@"enum".methods = self.collectAndFreeTempList(types.TypeMethod, &methods);
+        
+        for (0..fn_decls.items.len) |i| {
+            self.typeFnDeclBody(&new_scope, &decl.members[fn_decl_ast_indices.items[i]].value.fn_decl, &fn_decls.items[i]);
+        }
+        
+        self.fn_decls.appendSlice(self.allocator, self.collectAndFreeTempList(tast.FnDecl, &fn_decls)) catch unreachable;
     }
     
     fn typeVarDecl(self: *Typer, scope: *Scope, var_decl: *const ast.VarDecl, span: TokenSpan) tast.Stmt {
@@ -516,7 +707,7 @@ const Typer = struct {
         var value: ?*tast.Expr = null;
         
         if (scope.hasSelf(name)) {
-            self.reporter.reportErrorAtTokenArgs(var_decl.name, "Symbol '{s}' is already defined", .{name});
+            self.reporter.reportErrorAtToken(var_decl.name, "Identifier `{s}` is already defined", .{name});
         }
         
         if (var_decl.typ) |decl_typ| {
@@ -538,7 +729,7 @@ const Typer = struct {
                     const from = value.?.typ.getTextLeak(self.temp_allocator);
                     const to = typ.getTextLeak(self.temp_allocator);
                     
-                    self.reporter.reportErrorAtSpanArgs(decl_value.span, "Type '{s}' cannot be assigned to '{s}'", .{from, to});
+                    self.reporter.reportErrorAtSpan(decl_value.span, "Type `{s}` cannot be assigned to `{s}`", .{from, to});
                 }
             }
         }
@@ -547,7 +738,7 @@ const Typer = struct {
                 TokenKind.KeywordVar => {},
                 TokenKind.KeywordVal,
                 TokenKind.KeywordConst => {
-                    self.reporter.reportErrorAtSpan(span, "Declaration with val or const should have a value");
+                    self.reporter.reportErrorAtSpan(span, "Declaration with val or const should have a value", .{});
                 },
                 else => unreachable,
             }
@@ -555,7 +746,7 @@ const Typer = struct {
         
         typ = typ.coerceIntoRuntime(self.type_manager);
         
-        const name_symbol = self.symbol_manager.createSymbol(name);
+        const name_symbol = self.symbol_manager.createSymbol(name, scope.mode != .local);
         scope.set(name, name_symbol, typ);
         
         const kind: tast.VarDeclKind = switch (var_decl.decl.kind) {
@@ -586,14 +777,14 @@ const Typer = struct {
             .struct_member => {},
             
             else => {
-                self.reporter.reportErrorAtSpan(ass.lhs.span, "Cannot assign to rvalue");
+                self.reporter.reportErrorAtSpan(ass.lhs.span, "Cannot assign to rvalue", .{});
             }
         }
         
         if (!rhs.typ.canBeAssignedTo(lhs.typ)) {
-            self.reporter.reportErrorAtSpanArgs(
+            self.reporter.reportErrorAtSpan(
                 ass.rhs.span,
-                "Type {s} cannot be assigned to {s}",
+                "Type `{s}` cannot be assigned to `{s}`",
                 .{
                     rhs.typ.getTextLeak(self.temp_allocator),
                     lhs.typ.getTextLeak(self.temp_allocator),
@@ -638,28 +829,29 @@ const Typer = struct {
         const callee = self.makeExprPointer(self.typeExpr(scope, call.callee, types.UNKNOWN));
         
         if (callee.typ.kind != types.TypeKind.func) {
-            self.reporter.reportErrorAtSpan(call.callee.span, "Cannot call something that is not a function");
+            self.reporter.reportErrorAtSpan(call.callee.span, "Cannot call something that is not a function", .{});
         }
         
         const is_variadic = callee.typ.value.func.is_variadic;
         const param_types = callee.typ.value.func.params;
         const return_type = callee.typ.value.func.returns;
+        const skip_param: usize = if (callee.value == .struct_method or callee.value == .enum_method) 1 else 0;
         
         if (is_variadic) {
-            if (call.args.len < param_types.len - 1) {
-                self.reporter.reportErrorAtSpanArgs(
+            if (call.args.len < param_types.len - skip_param - 1) {
+                self.reporter.reportErrorAtSpan(
                     span,
                     "Expected {} or more arguments but got {}",
-                    .{ param_types.len - 1, call.args.len },
+                    .{ param_types.len - skip_param - 1, call.args.len },
                 );
             }
         }
         else {
-            if (call.args.len != param_types.len) {
-                self.reporter.reportErrorAtSpanArgs(
+            if (call.args.len != param_types.len - skip_param) {
+                self.reporter.reportErrorAtSpan(
                     span,
                     "Expected {} arguments but got {}",
-                    .{ param_types.len, call.args.len },
+                    .{ param_types.len - skip_param, call.args.len },
                 );
             }
         }
@@ -667,15 +859,16 @@ const Typer = struct {
         var typed_args = std.ArrayList(tast.Expr).initCapacity(self.allocator, call.args.len) catch unreachable;
         
         for (call.args, 0..) |arg, i| {
-            const index = if (i < param_types.len) i else if (is_variadic) param_types.len - 1 else unreachable;
+            const index = if (i < param_types.len - skip_param) i + skip_param
+            else if (is_variadic) param_types.len - skip_param - 1 else unreachable;
             
             const expr = self.typeExpr(scope, &arg, param_types[index]);
             typed_args.appendAssumeCapacity(expr);
             
             if (!expr.typ.canBeAssignedTo(param_types[index])) {
-                self.reporter.reportErrorAtSpanArgs(
+                self.reporter.reportErrorAtSpan(
                     arg.span,
-                    "Expected type {s} but got {s}",
+                    "Expected type `{s}` but got `{s}`",
                     .{
                         param_types[index].getTextLeak(self.temp_allocator),
                         expr.typ.getTextLeak(self.temp_allocator),
@@ -697,7 +890,7 @@ const Typer = struct {
         if (self.cur_fn) |cur_fn| {
             if (ret.value) |ret_value| {
                 if (cur_fn.return_typ.kind == types.TypeKind.void) {
-                    self.reporter.reportErrorAtSpan(span, "Cannot return a value from void function");
+                    self.reporter.reportErrorAtSpan(span, "Cannot return a value from void function", .{});
                 }
                 else {
                     value = self.makeExprPointer(self.typeExpr(scope, ret_value, cur_fn.return_typ));
@@ -706,9 +899,9 @@ const Typer = struct {
                         const expected_str = cur_fn.return_typ.getTextLeak(self.allocator);
                         const actual_str = value.?.typ.getTextLeak(self.allocator);
                         
-                        self.reporter.reportErrorAtSpanArgs(
+                        self.reporter.reportErrorAtSpan(
                             ret_value.span,
-                            "Expected return value of type {s} but got {s}",
+                            "Expected return value of type `{s}` but got `{s}`",
                             .{expected_str, actual_str},
                         );
                     }
@@ -716,11 +909,11 @@ const Typer = struct {
             }
             else if (cur_fn.return_typ.kind != types.TypeKind.void) {
                 const expected_str = cur_fn.return_typ.getTextLeak(self.allocator);
-                self.reporter.reportErrorAtSpanArgs(span, "Need a return value with type of {s}", .{expected_str});
+                self.reporter.reportErrorAtSpan(span, "Need a return value with type of `{s}`", .{expected_str});
             }
         }
         else {
-            self.reporter.reportErrorAtSpan(span, "return must be inside a function");
+            self.reporter.reportErrorAtSpan(span, "return must be inside a function", .{});
         }
         
         return .{ .returns = .{ .value = value } };
@@ -730,25 +923,15 @@ const Typer = struct {
         const cond = self.makeExprPointer(self.typeExpr(scope, iff.condition, types.UNKNOWN));
         
         if (!cond.typ.canBeUsedAsCond()) {
-            self.reporter.reportErrorAtSpanArgs(iff.condition.span, "Type {s} cannot be used as condition", .{cond.typ.getTextLeak(self.temp_allocator)});
+            self.reporter.reportErrorAtSpan(iff.condition.span, "Type `{s}` cannot be used as condition", .{cond.typ.getTextLeak(self.temp_allocator)});
         }
         
-        var body: *tast.Stmt = undefined;
-        
-        if (iff.body.value == .block) {
-            var new_scope = scope.inherit();
-            defer new_scope.deinit();
-            
-            body = self.makeStmtPointer(self.typeBlockStmt(&new_scope, &iff.body.value.block));
-        }
-        else {
-            body = self.makeStmtPointer(self.typeStmt(scope, iff.body));
-        }
+        const body = self.makeStmtPointer(self.typeStmt(scope, iff.body, false));
         
         var else_stmt: ?*tast.Stmt = null;
         
         if (iff.else_expr) |else_expr| {
-            else_stmt = self.makeStmtPointer(self.typeStmt(scope, else_expr));
+            else_stmt = self.makeStmtPointer(self.typeStmt(scope, else_expr, false));
         }
         
         return .{
@@ -764,7 +947,7 @@ const Typer = struct {
         const cond = self.makeExprPointer(self.typeExpr(scope, iff.condition, types.UNKNOWN));
         
         if (!cond.typ.canBeUsedAsCond()) {
-            self.reporter.reportErrorAtSpanArgs(iff.condition.span, "Type {s} cannot be used as condition", .{cond.typ.getTextLeak(self.temp_allocator)});
+            self.reporter.reportErrorAtSpan(iff.condition.span, "Type `{s}` cannot be used as condition", .{cond.typ.getTextLeak(self.temp_allocator)});
         }
         
         const true_expr = self.typeExpr(scope, iff.body, types.UNKNOWN);
@@ -777,9 +960,9 @@ const Typer = struct {
                 typ = typ.combinedWith(expr.typ);
             }
             else {
-                self.reporter.reportErrorAtSpanArgs(
+                self.reporter.reportErrorAtSpan(
                     span,
-                    "Cannot combine {s} and {s} as if expression",
+                    "Cannot combine `{s}` and `{s}` as if expression",
                     .{
                         typ.getTextLeak(self.temp_allocator),
                         expr.typ.getTextLeak(self.temp_allocator),
@@ -790,7 +973,7 @@ const Typer = struct {
             break :blk expr;
         }
         else {
-            self.reporter.reportErrorAtSpan(span, "if as an expression must have an else expression");
+            self.reporter.reportErrorAtSpan(span, "if as an expression must have an else expression", .{});
         };
         
         return .{
@@ -807,20 +990,10 @@ const Typer = struct {
         const cond = self.makeExprPointer(self.typeExpr(scope, whil.condition, types.UNKNOWN));
         
         if (!cond.typ.canBeUsedAsCond()) {
-            self.reporter.reportErrorAtSpanArgs(whil.condition.span, "Type {s} cannot be used as condition", .{cond.typ.getTextLeak(self.temp_allocator)});
+            self.reporter.reportErrorAtSpan(whil.condition.span, "Type `{s}` cannot be used as condition", .{cond.typ.getTextLeak(self.temp_allocator)});
         }
         
-        var body: *tast.Stmt = undefined;
-        
-        if (whil.body.value == .block) {
-            var new_scope = scope.inherit();
-            defer new_scope.deinit();
-            
-            body = self.makeStmtPointer(self.typeBlockStmt(&new_scope, &whil.body.value.block));
-        }
-        else {
-            body = self.makeStmtPointer(self.typeStmt(scope, whil.body));
-        }
+        const body = self.makeStmtPointer(self.typeStmt(scope, whil.body, false));
         
         return .{
             .whil = .{
@@ -835,11 +1008,11 @@ const Typer = struct {
         var index_var: ?Symbol = null;
         
         if (forr.item_var) |v| {
-            item_var = self.symbol_manager.createSymbol(self.getTokenText(v));
+            item_var = self.symbol_manager.createSymbol(self.getTokenText(v), false);
         }
         
         if (forr.index_var) |v| {
-            index_var = self.symbol_manager.createSymbol(self.getTokenText(v));
+            index_var = self.symbol_manager.createSymbol(self.getTokenText(v), false);
         }
         
         const iter = self.typeExpr(scope, forr.iter, types.UNKNOWN);
@@ -847,12 +1020,16 @@ const Typer = struct {
         switch (iter.typ.kind) {
             .numeric,
             .range => {
-                // For numeric and range iter, cannot crate index var
+                if (forr.is_reference) {
+                    self.reporter.reportErrorAtToken(forr.item_var.?, "The item in for loop with int and range iter cannot be a reference", .{});
+                }
+                
+                // For numeric and range iter, cannot create index var
                 // It will be confusing to distinguish between index and item, because they are both i32
                 // And moreover, if iter is numeric or range that starts from 0, both the value of item and index
                 // will be the same
                 if (forr.index_var) |v| {
-                    self.reporter.reportErrorAtToken(v, "For with int and range iter cannot have index");
+                    self.reporter.reportErrorAtToken(v, "For with int and range iter cannot have index", .{});
                 }
                 
                 var start: *tast.Expr = undefined;
@@ -863,6 +1040,7 @@ const Typer = struct {
                         self.reporter.reportErrorAtSpan(
                             forr.iter.span,
                             "Only numeric int can be used as for iterator",
+                            .{}
                         );
                     }
                     
@@ -883,6 +1061,7 @@ const Typer = struct {
                         self.reporter.reportErrorAtSpan(
                             forr.iter.span,
                             "Only numeric int can be used as for iterator",
+                            .{}
                         );
                     }
                 }
@@ -916,7 +1095,7 @@ const Typer = struct {
                     scope.set(v.text, v, types.I32);
                 }
                 
-                const body = self.makeStmtPointer(self.typeStmt(&new_scope, forr.body));
+                const body = self.makeStmtPointer(self.typeStmt(&new_scope, forr.body, true));
                 
                 return tast.Stmt{.for_range = .{
                     .item_var = item_var,
@@ -929,29 +1108,33 @@ const Typer = struct {
                 var new_scope = scope.inherit();
                 defer new_scope.deinit();
                 
+                const item_typ = if (forr.is_reference) self.type_manager.createReference(iter.typ.value.array.child)
+                else iter.typ.value.array.child;
+                
                 if (item_var) |v| {
-                    scope.set(v.text, v, iter.typ.value.array.child);
+                    scope.set(v.text, v, item_typ);
                 }
                 
                 if (index_var) |v| {
                     scope.set(v.text, v, types.I32);
                 }
                 
-                const body = self.makeStmtPointer(self.typeStmt(&new_scope, forr.body));
+                const body = self.makeStmtPointer(self.typeStmt(&new_scope, forr.body, true));
                 
                 return .{.for_each = .{
                     .item_var = item_var,
                     .index_var = index_var,
-                    .item_typ = iter.typ.value.array.child,
+                    .item_typ = item_typ,
+                    .is_reference = forr.is_reference,
                     .iter = self.makeExprPointer(iter),
                     .body = body,
                 }};
             },
             
             else => {
-                self.reporter.reportErrorAtSpanArgs(
+                self.reporter.reportErrorAtSpan(
                     forr.iter.span,
-                    "Type {s} is not iterable",
+                    "Type `{s}` is not iterable",
                     .{iter.typ.getTextLeak(self.allocator)},
                 );
             }
@@ -960,7 +1143,7 @@ const Typer = struct {
         unreachable;
     }
     
-    fn typeImport(self: *Typer, scope: *Scope, import: *const ast.Import) tast.Stmt {
+    fn typeImport(self: *Typer, scope: *Scope, import: *const ast.Import) void {
         const path_with_quote = self.getTokenText(import.path);
         const path = path_with_quote[1..path_with_quote.len - 1];
         const module = self.children.get(path);
@@ -971,10 +1154,6 @@ const Typer = struct {
             while (iter.next()) |entry| {
                 scope.setTypedSymbol(entry.key_ptr.*, entry.value_ptr.*);
             }
-            
-            return .{
-                .noop = {},
-            };
         }
         else {
             std.debug.panic("UNREACHABLE: Module should be loaded", .{});
@@ -995,6 +1174,9 @@ const Typer = struct {
             ast.Kind.range         => return self.typeRange(scope, &expr.value.range),
             ast.Kind.member_access => return self.typeMemberAccess(scope, &expr.value.member_access),
             ast.Kind.struct_value  => return self.typeStructValue(scope, &expr.value.struct_value, expr.span, exp_typ),
+            ast.Kind.enum_value    => return self.typeEnumValue(scope, &expr.value.enum_value, expr.span, exp_typ),
+            ast.Kind.address_of    => return self.typeAddressOf(scope, &expr.value.address_of),
+            ast.Kind.cast          => return self.typeCast(scope, &expr.value.cast, expr.span),
             
             else => {
                 std.debug.panic("TODO: typeExpr {s}", .{@tagName(expr.value)});
@@ -1013,7 +1195,7 @@ const Typer = struct {
             };
         }
         
-        self.reporter.reportErrorAtTokenArgs(ident.name, "Unknown symbol '{s}'", .{name});
+        self.reporter.reportErrorAtToken(ident.name, "Unknown identifier `{s}`", .{name});
     }
     
     fn typeLiteral(self: *Typer, scope: *Scope, lit: *const ast.Literal) tast.Expr {
@@ -1119,7 +1301,7 @@ const Typer = struct {
                     typ = types.BOOL;
                 }
                 else {
-                    self.reporter.reportErrorAtSpan(un.expr.span, "Unary not (!) operand must be bool type");
+                    self.reporter.reportErrorAtSpan(un.expr.span, "Unary not (!) operand must be bool type", .{});
                 }
             },
             .Minus => {
@@ -1143,7 +1325,7 @@ const Typer = struct {
                     }
                 }
                 else {
-                    self.reporter.reportErrorAtSpan(un.expr.span, "Unary minus (-) operand must be numeric type");
+                    self.reporter.reportErrorAtSpan(un.expr.span, "Unary minus (-) operand must be numeric type", .{});
                 }
             },
             
@@ -1165,8 +1347,8 @@ const Typer = struct {
         var lhs = self.typeExpr(scope, bin.lhs, types.UNKNOWN);
         
         const exp_typ = switch (lhs.typ.kind) {
-            .struc,
-            .enumm => lhs.typ,
+            .@"struct",
+            .@"enum" => lhs.typ,
             else => types.UNKNOWN,
         };
         
@@ -1246,7 +1428,7 @@ const Typer = struct {
                         // If rhs is a float, cast lhs into float
                         // rhs should be a float here, because lhs is not float and rhs is not the same as lhs
                         // (already checked above)
-                        else {
+                        else if (r_is_float) {
                             lhs = tast.Expr{
                                 .typ = rhs.typ,
                                 .value = .{.cast = .{
@@ -1334,6 +1516,34 @@ const Typer = struct {
                 else => {},
             }
         }
+        else if (lhs.typ.kind == .@"enum" and rhs.typ.kind == .@"enum") {
+            if (lhs.typ.type_id == rhs.typ.type_id) {
+                switch (bin.op.kind) {
+                    .EqEq,
+                    .NotEq => {
+                        valid = true;
+                        typ = types.BOOL;
+                    },
+                    else => {
+                        self.reporter.reportErrorAtSpan(
+                            span,
+                            "Only `==` and `!=` binary operation is supported for enum",
+                            .{},
+                        );
+                    }
+                }
+            }
+            else {
+                self.reporter.reportErrorAtSpan(
+                    span,
+                    "Invalid binary operation for enum `{s}` and `{s}`",
+                    .{
+                        lhs.typ.value.@"enum".name.text,
+                        rhs.typ.value.@"enum".name.text,
+                    },
+                );
+            }
+        }
         else if (lhs.value == .array_value) {
             if (bin.op.kind == .MulMul) {
                 if (rhs.value == .literal and rhs.value.literal == .int) {
@@ -1354,7 +1564,7 @@ const Typer = struct {
                     };
                 }
                 else {
-                    self.reporter.reportErrorAtSpan(bin.rhs.span, "Repeat (**) operand must be an int literal");
+                    self.reporter.reportErrorAtSpan(bin.rhs.span, "Repeat (**) operand must be an int literal", .{});
                 }
             }
             else if (bin.op.kind == .PlusPlus) {
@@ -1377,15 +1587,15 @@ const Typer = struct {
                     };
                 }
                 else {
-                    self.reporter.reportErrorAtSpan(bin.rhs.span, "Concat (++) operant must be an array with the same type");
+                    self.reporter.reportErrorAtSpan(bin.rhs.span, "Concat (++) operant must be an array with the same type", .{});
                 }
             }
         }
         
         if (need_explicit_cast) {
-            self.reporter.reportErrorAtSpanArgs(
+            self.reporter.reportErrorAtSpan(
                 span,
-                "Need explicit cast in binary operation {s} for type {s} and {s}",
+                "Need explicit cast in binary operation `{s}` for type `{s}` and `{s}`",
                 .{
                     bin.op.kind.getBinopText(),
                     lhs.typ.getTextLeak(self.temp_allocator),
@@ -1394,9 +1604,9 @@ const Typer = struct {
             );
         }
         else if (!valid) {
-            self.reporter.reportErrorAtTokenArgs(
+            self.reporter.reportErrorAtToken(
                 bin.op,
-                "Invalid binary operation {s} for type {s} and {s}",
+                "Invalid binary operation `{s}` for type `{s}` and `{s}`",
                 .{
                     bin.op.kind.getBinopText(),
                     lhs.typ.getTextLeak(self.temp_allocator),
@@ -1455,9 +1665,9 @@ const Typer = struct {
                     elem_typ = elem_typ.combinedWith(elem_expr.typ);
                 }
                 else {
-                    self.reporter.reportErrorAtSpanArgs(
+                    self.reporter.reportErrorAtSpan(
                         elem.span,
-                        "Expected type {s} but got {s}",
+                        "Expected type `{s}` but got `{s}`",
                         .{
                             elem_typ.getTextLeak(self.allocator),
                             elem_expr.typ.getTextLeak(self.allocator),
@@ -1479,9 +1689,9 @@ const Typer = struct {
             typ = typ.assignTo(exp_typ);
         }
         else {
-            self.reporter.reportErrorAtSpanArgs(
+            self.reporter.reportErrorAtSpan(
                 span,
-                "Expected type {s} but got {s}",
+                "Expected type `{s}` but got `{s}`",
                 .{
                     exp_typ.getTextLeak(self.allocator),
                     typ.getTextLeak(self.allocator),
@@ -1500,13 +1710,13 @@ const Typer = struct {
         const index = self.makeExprPointer(self.typeExpr(scope, arr.index, types.UNKNOWN));
         
         if (callee.typ.kind != .array) {
-            self.reporter.reportErrorAtSpan(arr.callee.span, "Not an array");
+            self.reporter.reportErrorAtSpan(arr.callee.span, "Not an array", .{});
         }
         
         if (!index.typ.isNumericInt()) {
-            self.reporter.reportErrorAtSpanArgs(
+            self.reporter.reportErrorAtSpan(
                 arr.index.span,
-                "Type {s} cannot be used as array index",
+                "Type `{s}` cannot be used as array index",
                 .{index.typ.getTextLeak(self.temp_allocator)},
             );
         }
@@ -1525,17 +1735,17 @@ const Typer = struct {
         const rhs = self.makeExprPointer(self.typeExpr(scope, range.rhs, types.UNKNOWN));
         
         if (!lhs.typ.canBeAssignedTo(types.I32)) {
-            self.reporter.reportErrorAtSpanArgs(
+            self.reporter.reportErrorAtSpan(
                 range.lhs.span,
-                "Type {s} cannot be used as for range item. Must be an int",
+                "Type `{s}` cannot be used as for range item. Must be an int",
                 .{lhs.typ.getTextLeak(self.allocator)},
             );
         }
         
         if (!rhs.typ.canBeAssignedTo(types.I32)) {
-            self.reporter.reportErrorAtSpanArgs(
+            self.reporter.reportErrorAtSpan(
                 range.rhs.span,
-                "Type {s} cannot be used as for range item. Must be an int",
+                "Type `{s}` cannot be used as for range item. Must be an int",
                 .{rhs.typ.getTextLeak(self.allocator)},
             );
         }
@@ -1557,54 +1767,248 @@ const Typer = struct {
             .array => {
                 return self.typeArrayBuiltin(scope, callee, mem.member);
             },
-            .struc => {
-                const struct_typ = callee.typ.value.struc;
-                const member_text = self.getTokenText(mem.member);
-                var exists = false;
-                var typ: *const Type = undefined;
-                var member_index: usize = undefined;
-                
-                for (struct_typ.fields, 0..) |field, i| {
-                    if (std.mem.eql(u8, field.name.text, member_text)) {
-                        exists = true;
-                        typ = field.typ;
-                        member_index = i;
-                        
-                        break;
-                    }
+            .@"struct" => {
+                return self.typeStructMember(scope, callee, mem.member, false);
+            },
+            .@"enum" => {
+                return self.typeEnumMember(scope, callee, mem.member, false);
+            },
+            .reference => {
+                if (callee.typ.value.reference.child.kind == .@"struct") {
+                    return self.typeStructMember(scope, callee, mem.member, true);
                 }
-                
-                if (!exists) {
-                    self.reporter.reportErrorAtTokenArgs(
-                        mem.member,
-                        "Type {s} doesn't have member '{s}'",
-                        .{
-                            callee.typ.getTextLeak(self.allocator),
-                            self.getTokenText(mem.member),
-                        }
-                    );
+                else if (callee.typ.value.reference.child.kind == .@"enum") {
+                    return self.typeEnumMember(scope, callee, mem.member, true);
                 }
+            },
+            .typ => {
+                switch (callee.typ.value.typ.child.value) {
+                    .@"enum" => {
+                        return self.typeEnumItem(callee.typ.value.typ.child, mem.member);
+                    },
+                    .@"struct" => |struct_typ| {
+                        return self.typeStructStaticMember(scope, &struct_typ, mem.member);
+                    },
+                    else => {},
+                }
+            },
+            else => {}
+        }
+        
+        self.reporter.reportErrorAtToken(
+            mem.member,
+            "Type `{s}` doesn't have member `{s}`",
+            .{
+                callee.typ.getTextLeak(self.allocator),
+                self.getTokenText(mem.member),
+            }
+        );
+    }
+    
+    fn typeStructMember(self: *Typer, scope: *Scope, callee: *tast.Expr, member: Token, is_reference: bool) tast.Expr {
+        _ = scope;
+        
+        const callee_typ = if (is_reference) callee.typ.value.reference.child else callee.typ;
+        const struct_typ = callee_typ.value.@"struct";
+        const member_text = self.getTokenText(member);
+        
+        for (struct_typ.fields, 0..) |field, i| {
+            if (std.mem.eql(u8, field.name.text, member_text)) {
+                const typ = field.typ;
                 
                 return .{
                     .typ = typ,
                     .value = .{.struct_member = .{
                         .callee = callee,
-                        .member_index = member_index,
+                        .member_index = i,
                     }},
                 };
-            },
-            
-            else => {
-                self.reporter.reportErrorAtTokenArgs(
-                    mem.member,
-                    "Type {s} doesn't have member '{s}'",
-                    .{
-                        callee.typ.getTextLeak(self.allocator),
-                        self.getTokenText(mem.member),
-                    }
-                );
             }
         }
+        
+        for (struct_typ.methods, 0..) |method, i| {
+            if (std.mem.eql(u8, method.name.text, member_text)) {
+                var actual_callee = callee;
+                
+                if (method.typ.value.func.params[0].value == .reference) {
+                    if (callee.typ.value == .@"struct") {
+                        const reference_typ = self.type_manager.createReference(callee.typ);
+                        
+                        actual_callee = self.makeExprPointer(.{
+                            .value = .{
+                                .referenc_of = .{
+                                    .value = callee,
+                                    .typ = reference_typ,
+                                }
+                            },
+                            .typ = reference_typ,
+                        });
+                    }
+                }
+                else if (callee.typ.value == .reference) {
+                    if (method.typ.value.func.params[0].value == .@"struct") {
+                        actual_callee = self.makeExprPointer(.{
+                            .value = .{
+                                .dereferenc_of = .{
+                                    .value = callee,
+                                    .typ = callee.typ.value.reference.child,
+                                }
+                            },
+                            .typ = callee.typ.value.reference.child,
+                        });
+                    }
+                }
+                
+                return .{
+                    .typ = method.typ,
+                    .value = .{.struct_method = .{
+                        .callee = actual_callee,
+                        .method_index = i,
+                        .struct_typ = callee_typ,
+                    }},
+                };
+            }
+        }
+        
+        self.reporter.reportErrorAtToken(
+            member,
+            "Type `{s}` doesn't have member `{s}`",
+            .{
+                callee.typ.getTextLeak(self.allocator),
+                member_text,
+            }
+        );
+    }
+    
+    fn typeStructStaticMember(self: *Typer, scope: *Scope, struct_typ: *const types.TypeStruct, member: Token) tast.Expr {
+        const struct_symbol = scope.get(struct_typ.name.text);
+        std.debug.assert(struct_symbol != null and struct_symbol.?.typ.value == .typ and struct_symbol.?.typ.value.typ.child.value == .@"struct");
+        
+        const member_text = self.getTokenText(member);
+        
+        if (struct_symbol.?.child_symbols) |child_symbols| {
+            const symbol = child_symbols.get(member_text);
+            
+            if (symbol) |sym| {
+                return .{
+                    .typ = sym.typ,
+                    .value = .{.identifier = .{ .name = sym.symbol }},
+                };
+            }
+        }
+        
+        self.reporter.reportErrorAtToken(
+            member,
+            "Struct `{s}` doesn't have static member `{s}`",
+            .{
+                struct_typ.name.text,
+                member_text,
+            },
+        );
+    }
+    
+    fn typeEnumValue(self: *Typer, scope: *Scope, val: *const ast.EnumValue, span: TokenSpan, exp_typ: *const Type) tast.Expr {
+        _ = scope;
+        _ = span;
+        
+        if (exp_typ.value != .@"enum") {
+            // self.reporter.reportErrorAtSpan(span, "Unknown enum value", .{});
+            return .{
+                .typ = types.UNKNOWN_ENUM,
+                .value = .invalid,
+            };
+        }
+        
+        return self.typeEnumItem(exp_typ, val.item);
+    }
+    
+    fn typeEnumItem(self: *Typer, enum_typ: *const Type, member: Token) tast.Expr {
+        const member_text = self.getTokenText(member);
+        var item_index: ?usize = null;
+        
+        for (enum_typ.value.@"enum".items, 0..) |item, i| {
+            if (std.mem.eql(u8, member_text, item.text)) {
+                item_index = i;
+                break;
+            }
+        }
+        
+        if (item_index == null) {
+            self.reporter.reportErrorAtToken(
+                member,
+                "Enum `{s}` doesn't have item `{s}`",
+                .{
+                    enum_typ.value.@"enum".name.text,
+                    member_text,
+                }
+            );
+        }
+        
+        return .{
+            .typ = enum_typ,
+            .value = .{.enum_value = .{ .item_index = item_index.? }},
+        };
+    }
+    
+    fn typeEnumMember(self: *Typer, scope: *Scope, callee: *tast.Expr, member: Token, is_reference: bool) tast.Expr {
+        _ = scope;
+        
+        const callee_typ = if (is_reference) callee.typ.value.reference.child else callee.typ;
+        const enum_typ = callee_typ.value.@"enum";
+        const member_text = self.getTokenText(member);
+        
+        for (enum_typ.methods, 0..) |method, i| {
+            if (std.mem.eql(u8, method.name.text, member_text)) {
+                var actual_callee = callee;
+                
+                if (method.typ.value.func.params[0].value == .reference) {
+                    if (callee.typ.value == .@"struct") {
+                        const reference_typ = self.type_manager.createReference(callee.typ);
+                        
+                        actual_callee = self.makeExprPointer(.{
+                            .value = .{
+                                .referenc_of = .{
+                                    .value = callee,
+                                    .typ = reference_typ,
+                                }
+                            },
+                            .typ = reference_typ,
+                        });
+                    }
+                }
+                else if (callee.typ.value == .reference) {
+                    if (method.typ.value.func.params[0].value == .@"struct") {
+                        actual_callee = self.makeExprPointer(.{
+                            .value = .{
+                                .dereferenc_of = .{
+                                    .value = callee,
+                                    .typ = callee.typ.value.reference.child,
+                                }
+                            },
+                            .typ = callee.typ.value.reference.child,
+                        });
+                    }
+                }
+                
+                return .{
+                    .typ = method.typ,
+                    .value = .{.enum_method = .{
+                        .callee = actual_callee,
+                        .method_index = i,
+                        .enum_typ = callee_typ,
+                    }},
+                };
+            }
+        }
+        
+        self.reporter.reportErrorAtToken(
+            member,
+            "Type `{s}` doesn't have member `{s}`",
+            .{
+                callee.typ.getTextLeak(self.allocator),
+                member_text,
+            }
+        );
     }
     
     fn typeArrayBuiltin(self: *Typer, scope: *Scope, ar: *tast.Expr, member: Token) tast.Expr {
@@ -1633,9 +2037,9 @@ const Typer = struct {
                 };
             }
             else {
-                self.reporter.reportErrorAtTokenArgs(
+                self.reporter.reportErrorAtToken(
                     member,
-                    "Type {s} doesn't have member '{s}'",
+                    "Type `{s}` doesn't have member `{s}`",
                     .{
                         ar.typ.getTextLeak(self.allocator),
                         self.getTokenText(member),
@@ -1644,9 +2048,9 @@ const Typer = struct {
             }
         }
         else {
-            self.reporter.reportErrorAtTokenArgs(
+            self.reporter.reportErrorAtToken(
                 member,
-                "Type {s} doesn't have member '{s}'",
+                "Type `{s}` doesn't have member `{s}`",
                 .{
                     ar.typ.getTextLeak(self.allocator),
                     self.getTokenText(member),
@@ -1663,10 +2067,14 @@ const Typer = struct {
             const struct_symbol = scope.get(name_text);
             
             if (struct_symbol) |symbol| {
-                typ = symbol.typ;
+                if (symbol.typ.value != .typ or symbol.typ.value.typ.child.value != .@"struct") {
+                    self.reporter.reportErrorAtToken(struct_name, "Not a struct", .{});
+                }
+                
+                typ = symbol.typ.value.typ.child;
             }
             else {
-                self.reporter.reportErrorAtTokenArgs(struct_name, "Unknown identifier '{s}'", .{name_text});
+                self.reporter.reportErrorAtToken(struct_name, "Unknown identifier `{s}`", .{name_text});
             }
         }
         else if (exp_typ.kind != .unknown) {
@@ -1676,17 +2084,13 @@ const Typer = struct {
             std.debug.panic("TODO: typeStructValue without struct name", .{});
         }
         
-        if (typ.value != .struc) {
-            self.reporter.reportErrorAtToken(val.struct_name.?, "Not a struct");
-        }
-        
         const FieldState = enum {
             unresolved,
             resolved,
             has_default,
         };
         
-        const struct_typ = typ.value.struc;
+        const struct_typ = typ.value.@"struct";
         const field_len = struct_typ.fields.len;
         var field_states = self.temp_allocator.alloc(FieldState, field_len) catch unreachable;
         defer self.temp_allocator.free(field_states);
@@ -1703,7 +2107,7 @@ const Typer = struct {
         
         for (0..val.elems.len) |i| {
             if (i >= field_len) {
-                self.reporter.reportErrorAtSpan(val.elems[i].value.span, "Too many field");
+                self.reporter.reportErrorAtSpan(val.elems[i].value.span, "Too many field", .{});
             }
             
             var field_index: usize = undefined;
@@ -1720,18 +2124,18 @@ const Typer = struct {
                 }
                 
                 if (index == null) {
-                    self.reporter.reportErrorAtTokenArgs(
+                    self.reporter.reportErrorAtToken(
                         field_name_token,
-                        "Unkown struct field '{s}'",
+                        "Unkown struct field `{s}`",
                         .{field_name},
                     );
                 }
                 
                 // Placed here because it's impossible to have duplicate unless field has a name
-                if (field_states[i] == .resolved) {
-                    self.reporter.reportErrorAtTokenArgs(
+                if (field_states[index.?] == .resolved) {
+                    self.reporter.reportErrorAtToken(
                         field_name_token,
-                        "Duplicate struct field '{s}'",
+                        "Duplicate struct field `{s}`",
                         .{field_name},
                     );
                 }
@@ -1742,15 +2146,26 @@ const Typer = struct {
                 field_index = i;
             }
             
-            field_states[i] = .resolved;
-            values[i] = self.typeExpr(scope, &val.elems[i].value, struct_typ.fields[i].typ);
+            field_states[field_index] = .resolved;
+            values[field_index] = self.typeExpr(scope, &val.elems[i].value, struct_typ.fields[field_index].typ);
+            
+            if (!values[field_index].typ.canBeAssignedTo(struct_typ.fields[field_index].typ)) {
+                self.reporter.reportErrorAtSpan(
+                    val.elems[i].value.span,
+                    "Expected type `{s}` but got `{s}`",
+                    .{
+                        struct_typ.fields[i].typ.getTextLeak(self.allocator),
+                        values[i].typ.getTextLeak(self.allocator),
+                    }
+                );
+            }
         }
         
         for (field_states, 0..) |field_state, i| {
             if (field_state == .unresolved) {
-                self.reporter.reportErrorAtSpanArgs(
+                self.reporter.reportErrorAtSpan(
                     span,
-                    "Missing struct field '{s}' with type of {s}",
+                    "Missing struct field `{s}` with type of `{s}`",
                     .{
                         struct_typ.fields[i].name.text,
                         struct_typ.fields[i].typ.getTextLeak(self.allocator),
@@ -1765,6 +2180,42 @@ const Typer = struct {
         return .{
             .typ = typ,
             .value = .{ .struct_value = .{ .values = values } },
+        };
+    }
+    
+    fn typeAddressOf(self: *Typer, scope: *Scope, addr: *const ast.AddressOf) tast.Expr {
+        const value = self.typeExpr(scope, addr.value, types.UNKNOWN);
+        
+        return .{
+            .typ = self.type_manager.createReference(value.typ),
+            .value = .{.referenc_of = .{
+                .typ = value.typ,
+                .value = self.makeExprPointer(value),
+            }},
+        };
+    }
+    
+    fn typeCast(self: *Typer, scope: *Scope, cast: *const ast.Cast, span: TokenSpan) tast.Expr {
+        const expr = self.typeExpr(scope, cast.value, types.UNKNOWN);
+        const typ = self.typeType(scope, &cast.typ);
+        
+        if (!expr.typ.canBeCastTo(typ)) {
+            self.reporter.reportErrorAtSpan(
+                span,
+                "Cannot cast `{s}` to `{s}`",
+                .{
+                    expr.typ.getTextLeak(self.allocator),
+                    typ.getTextLeak(self.allocator),
+                }
+            );
+        }
+        
+        return .{
+            .typ = typ,
+            .value = .{.cast = .{
+                .value = self.makeExprPointer(expr),
+                .typ = typ,
+            }},
         };
     }
     
@@ -1798,10 +2249,14 @@ const Typer = struct {
                     const symbol = scope.get(typ_text);
                     
                     if (symbol) |sym| {
-                        result_type = sym.typ;
+                        if (sym.typ.kind != .typ) {
+                            self.reporter.reportErrorAtToken(typ.value.simple.name, "`{s}` is not a type", .{typ_text});
+                        }
+                        
+                        result_type = sym.typ.value.typ.child;
                     }
                     else {
-                        self.reporter.reportErrorAtTokenArgs(typ.value.simple.name, "Unknown type '{s}'", .{typ_text});
+                        self.reporter.reportErrorAtToken(typ.value.simple.name, "Unknown type `{s}`", .{typ_text});
                     }
                 }
             },
@@ -1877,20 +2332,19 @@ pub fn typecheck(
     reporter: Reporter,
     file_manager: *const FileManager,
     symbol_manager: *SymbolManager,
+    type_manager: *TypeManager,
     module: *const ast.Module,
     module_id: usize,
+    module_name: []const u8,
     children: *const std.StringHashMap(*tast.Module),
 ) tast.Module {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const temp_allocator = gpa.allocator();
     defer std.debug.assert(gpa.deinit() == .ok);
     
-    var type_manager = TypeManager.init(arena, temp_allocator);
-    defer type_manager.deinit();
-    
-    var typer = Typer.init(arena, temp_allocator, reporter, file_manager, &type_manager, symbol_manager, children);
-    var scope = Scope.init(temp_allocator, true);
+    var typer = Typer.init(arena, temp_allocator, reporter, file_manager, type_manager, symbol_manager, children);
+    var scope = Scope.init(temp_allocator, .module);
     defer scope.deinit();
     
-    return typer.typeModule(&scope, module, module_id);
+    return typer.typeModule(&scope, module, module_id, module_name);
 }

@@ -13,7 +13,7 @@ const TypeManager = @import("type.zig").TypeManager;
 const cgen = @import("cgen.zig");
 const Driver = @import("driver.zig").Driver;
 
-pub fn main() !void {
+pub fn main() !void {    
     var args = std.process.args();    
     const options = CompilerOptions.parse(&args);
     

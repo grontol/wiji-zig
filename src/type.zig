@@ -42,23 +42,25 @@ pub const NumericKind = enum(u16) {
 
 pub const TypeKind = enum {
     unknown,
+    unknown_enum,
     void,
     numeric,
     string,
     char,
     bool,
-    enumm,
+    @"enum",
     any,
     range,
     
     func,
     array,
-    struc,
+    @"struct",
     reference,
     pointer,
     nullable,
     tuple,
     generic,
+    typ,
 };
 
 pub const TypeFunc = struct {
@@ -82,9 +84,21 @@ pub const TypeStructField = struct {
     default_value: ?*anyopaque,
 };
 
+pub const TypeMethod = struct {
+    name: Symbol,
+    typ: *const Type,
+};
+
 pub const TypeStruct = struct {
     name: Symbol,
     fields: []const TypeStructField,
+    methods: []const TypeMethod,
+};
+
+pub const TypeEnum = struct {
+    name: Symbol,
+    items: []const Symbol,
+    methods: []const TypeMethod,
 };
 
 pub const TypeId = u64;
@@ -93,17 +107,18 @@ pub const Type = struct {
     kind: TypeKind,
     value: union(TypeKind) {
         unknown,
+        unknown_enum,
         void,
         numeric: NumericKind,
         string,
         char,
         bool,
-        enumm,
+        @"enum": TypeEnum,
         any,
         range,
         func: TypeFunc,
         array: TypeArray,
-        struc: TypeStruct,
+        @"struct": TypeStruct,
         reference: struct {
             child: *const Type,
         },
@@ -118,6 +133,9 @@ pub const Type = struct {
         },
         generic: struct {
             childen: []const *const Type,
+        },
+        typ: struct {
+            child: *const Type,
         },
     },
     size: u16,
@@ -160,6 +178,7 @@ pub const Type = struct {
                 
                 return self.value.array.child.isSame(other.value.array.child);
             },
+            TypeKind.@"enum" => { return false; },
             
             else => {
                 std.debug.panic("TODO: Type.canBeAssignedTo {s}", .{@tagName(self.kind)});
@@ -183,6 +202,10 @@ pub const Type = struct {
         return self.isSame(other);
     }
     
+    pub fn canBeCastTo(self: *const Type, other: *const Type) bool {
+        return self.kind == .numeric and other.kind == .numeric;
+    }
+    
     pub fn isSame(self: *const Type, other: *const Type) bool {
         if (self.type_id == other.type_id) return true;
         if (self.kind != other.kind) return false;
@@ -195,6 +218,7 @@ pub const Type = struct {
             TypeKind.string,
             TypeKind.void,
             TypeKind.unknown => { return true; },
+            TypeKind.@"enum" => { return false; },
             
             TypeKind.numeric => {
                 return self.value.numeric == other.value.numeric;
@@ -212,10 +236,20 @@ pub const Type = struct {
                 
                 return true;
             },
+            TypeKind.reference => {
+                return self.value.reference.child.isSame(other.value.reference.child);
+            },
+            TypeKind.@"struct" => return false,
             else => {
                 std.debug.panic("TODO: Type.isSame {s}", .{@tagName(self.value)});
             }
         }
+    }
+    
+    pub fn isSameOrSameReference(self: *const Type, other: *const Type) bool {
+        if (self.isSame(other)) return true;
+        if (self.value == .reference) return self.value.reference.child.isSame(other);
+        return false;
     }
     
     pub fn coerceIntoRuntime(self: *const Type, type_manager: *TypeManager) *const Type {
@@ -267,14 +301,15 @@ pub const Type = struct {
     
     pub fn getText(self: *const Type, out: *std.ArrayList(u8), allocator: std.mem.Allocator) void {
         switch (self.value) {
-            TypeKind.unknown => { out.appendSlice(allocator, "unknown") catch unreachable; },
-            TypeKind.void    => { out.appendSlice(allocator, "void") catch unreachable; },
-            TypeKind.string  => { out.appendSlice(allocator, "string") catch unreachable; },
-            TypeKind.char    => { out.appendSlice(allocator, "char") catch unreachable; },
-            TypeKind.bool    => { out.appendSlice(allocator, "bool") catch unreachable; },
-            TypeKind.any     => { out.appendSlice(allocator, "any") catch unreachable; },
-            TypeKind.range   => { out.appendSlice(allocator, "range") catch unreachable; },
-            TypeKind.numeric => {
+            TypeKind.unknown      => { out.appendSlice(allocator, "unknown") catch unreachable; },
+            TypeKind.unknown_enum => { out.appendSlice(allocator, "unknown_enum") catch unreachable; },
+            TypeKind.void         => { out.appendSlice(allocator, "void") catch unreachable; },
+            TypeKind.string       => { out.appendSlice(allocator, "string") catch unreachable; },
+            TypeKind.char         => { out.appendSlice(allocator, "char") catch unreachable; },
+            TypeKind.bool         => { out.appendSlice(allocator, "bool") catch unreachable; },
+            TypeKind.any          => { out.appendSlice(allocator, "any") catch unreachable; },
+            TypeKind.range        => { out.appendSlice(allocator, "range") catch unreachable; },
+            TypeKind.numeric      => {
                 switch (self.value.numeric) {
                     NumericKind.u8            => { out.appendSlice(allocator, "u8") catch unreachable; },
                     NumericKind.u16           => { out.appendSlice(allocator, "u16") catch unreachable; },
@@ -321,8 +356,24 @@ pub const Type = struct {
                 self.value.func.returns.getText(out, allocator);
             },
             
-            TypeKind.struc => {
-                out.print(allocator, "{s}", .{self.value.struc.name.text}) catch unreachable;
+            TypeKind.@"struct" => {
+                out.print(allocator, "{s}", .{self.value.@"struct".name.text}) catch unreachable;
+            },
+            
+            TypeKind.@"enum" => {
+                out.print(allocator, "{s}", .{self.value.@"enum".name.text}) catch unreachable;
+            },
+            
+            TypeKind.reference => {
+                out.appendSlice(allocator, "&") catch unreachable;
+                self.value.reference.child.getText(out, allocator);
+            },
+            
+            TypeKind.typ => {
+                out.print(allocator, "{s}", .{@tagName(self.value.typ.child.value)}) catch unreachable;
+                out.appendSlice(allocator, "(") catch unreachable;
+                self.value.typ.child.getText(out, allocator);
+                out.appendSlice(allocator, ")") catch unreachable;
             },
             
             else => {
@@ -351,6 +402,7 @@ pub const CHAR          = &Type{ .size = 1,  .alignment = 1, .type_id = 15, .has
 pub const BOOL          = &Type{ .size = 1,  .alignment = 1, .type_id = 16, .hash = 16, .kind = .bool,    .value = .bool };
 pub const RANGE         = &Type{ .size = 8,  .alignment = 4, .type_id = 17, .hash = 17, .kind = .range,   .value = .range };
 pub const ANY           = &Type{ .size = 8,  .alignment = 8, .type_id = 18, .hash = 18, .kind = .any,     .value = .any };
+pub const UNKNOWN_ENUM  = &Type{ .size = 0,  .alignment = 0, .type_id = 19, .hash = 19, .kind = .unknown_enum, .value = .unknown_enum };
 
 pub const TypeManager = struct {
     arena: std.mem.Allocator,
@@ -464,12 +516,16 @@ pub const TypeManager = struct {
             new_typ_ptr.* = typ;            
             self.cur_index += 1;
             
+            self.type_map.put(typ, new_typ_ptr) catch unreachable;
+            
             return new_typ_ptr;
         }
     }
     
-    pub fn createStruct(self: *TypeManager, name: Symbol, fields: []TypeStructField) *const Type {
-        var h = combineHash(@intFromEnum(TypeKind.struc), fields.len);
+    pub fn createStruct(self: *TypeManager, name: Symbol, fields: []TypeStructField, methods: []const TypeMethod) *Type {
+        var h = combineHash(@intFromEnum(TypeKind.@"struct"), fields.len);
+        h = combineHashWithString(h, name.text);
+        
         var size: u16 = 0;
         var alignment: u16 = 0;
         
@@ -491,19 +547,20 @@ pub const TypeManager = struct {
             size += field_size;
         }
         
-        if (size % alignment > 0) {
+        if (alignment > 0 and size % alignment > 0) {
             size += alignment - (size % alignment);
         }
         
         const typ = Type{
-            .kind = .struc,
+            .kind = .@"struct",
             .size = size,
             .alignment = alignment,
             .type_id = self.cur_index,
             .hash = h,
-            .value = .{.struc = .{
+            .value = .{.@"struct" = .{
                 .name = name,
                 .fields = fields,
+                .methods = methods,
             }},
         };
         
@@ -516,6 +573,73 @@ pub const TypeManager = struct {
             const new_typ_ptr = self.arena.create(Type) catch unreachable;
             new_typ_ptr.* = typ;
             self.cur_index += 1;
+            
+            self.type_map.put(typ, new_typ_ptr) catch unreachable;
+            
+            return new_typ_ptr;
+        }
+    }
+    
+    pub fn createEnum(self: *TypeManager, name: Symbol, items: []Symbol, methods: []const TypeMethod) *Type {
+        var h = combineHash(@intFromEnum(TypeKind.@"struct"), items.len);
+        h = combineHashWithString(h, name.text);
+        
+        for (items) |item| {
+            h = combineHashWithString(h, item.text);
+        }
+        
+        const typ = Type{
+            .kind = .@"enum",
+            .size = 8,
+            .alignment = 8,
+            .type_id = self.cur_index,
+            .hash = h,
+            .value = .{.@"enum" = .{
+                .name = name,
+                .items = items,
+                .methods = methods,
+            }},
+        };
+        
+        const typ_ptr = self.type_map.get(typ);
+        
+        if (typ_ptr) |ptr| {
+            return ptr;
+        }
+        else {
+            const new_typ_ptr = self.arena.create(Type) catch unreachable;
+            new_typ_ptr.* = typ;
+            self.cur_index += 1;
+            
+            self.type_map.put(typ, new_typ_ptr) catch unreachable;
+            
+            return new_typ_ptr;
+        }
+    }
+    
+    pub fn createType(self: *TypeManager, child: *const Type) *const Type {
+        const typ = Type{
+            .kind = .typ,
+            .size = 8,
+            .alignment = 8,
+            .type_id = self.cur_index,
+            .hash = combineHash(@intFromEnum(TypeKind.typ), child.hash),
+            .value = .{.typ = .{
+                .child = child,
+            }},
+        };
+        
+        const typ_ptr = self.type_map.get(typ);
+        
+        if (typ_ptr) |ptr| {
+            return ptr;
+        }
+        else {
+            const new_typ_ptr = self.arena.create(Type) catch unreachable;
+            new_typ_ptr.* = typ;
+            self.cur_index += 1;
+            
+            self.type_map.put(typ, new_typ_ptr) catch unreachable;
             
             return new_typ_ptr;
         }
@@ -533,7 +657,7 @@ fn TypeHashMap() type {
         }
     };
     
-    return std.HashMap(Type, *const Type, Context, std.hash_map.default_max_load_percentage);
+    return std.HashMap(Type, *Type, Context, std.hash_map.default_max_load_percentage);
 }
 
 fn combineHash(a: u64, b: u64) u64 {
@@ -545,4 +669,8 @@ fn combineHash(a: u64, b: u64) u64 {
     x ^= x >> 32;
     
     return x;
+}
+
+fn combineHashWithString(a: u64, s: []const u8) u64 {
+    return std.hash.Wyhash.hash(a, s);
 }

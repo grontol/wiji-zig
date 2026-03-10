@@ -1,0 +1,6 @@
+✔ CGen namespacing (module/struct/enum) @done(26-03-10 10:36)
+✔ Variable declaration inside struct (var or const) @done(26-03-10 10:36)
+☐ AKses struct variable & static function dari luar (mungkin pake Struct::VAR / Struct::funct())
+☐ "Static" function inside struct
+☐ Check import symbol collision (sementara bakal ke-resolve yang terakhir diimport)
+☐ Check variable const-ness (for assignment or something else)

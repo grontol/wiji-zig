@@ -1,0 +1,60 @@
+import "../raylib.wj"
+
+const SCREEN_WIDTH  = 1280
+const SCREEN_HEIGHT = 720
+
+fn main() {
+    setTargetFPS(60)
+    initWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Battle")
+    
+    const textGreen = loadTexture("examples/battle/assets/green.png")
+    
+    val e = Entity.{
+        x = 100,
+        y = 100,
+        w = 100,
+        h = 100,
+        img = textGreen,
+        kind = .player,
+    }
+    
+    while !windowShouldClose() {
+        beginDrawing()
+        clearBackground(GRAY)
+        
+        e.draw()
+        
+        drawFPS(20, 20)
+        endDrawing()
+    }
+    
+    closeWindow()
+}
+
+enum EntityKind {
+    player,
+    enemy,
+    bullet,
+}
+
+struct Entity {
+    x: i32
+    y: i32
+    w: i32
+    h: i32
+    kind: EntityKind
+    img: Texture
+    
+    // var foo = 10
+    
+    fn draw(self: &Entity) {
+        drawTexturePro(
+            self.img,
+            .{0, 0, self.img.width as f32, self.img.height as f32},
+            .{self.x as f32, self.y as f32, self.w as f32, self.h as f32},
+            .{0, 0},
+            0,
+            WHITE,
+        )
+    }
+}

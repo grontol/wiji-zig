@@ -1,9 +1,9 @@
 fn main() {
-    val simp: i32
-    val arr: []i32
-    val tuple: (i32, []i32, &Foo)
-    val generic: Foo<Bar, i32, []i32>
-    val nullable: ?i32
+    var simp: i32
+    var arr: []i32
+    var tuple: (i32, []i32, &Foo)
+    var generic: Foo<Bar, i32, []i32>
+    var nullable: ?i32
 }
 
 /***
@@ -17,27 +17,27 @@ Module {
             body: Block {
                 exprs: [
                     VarDecl {
-                        decl: val,
+                        decl: var,
                         name: 'simp',
                         type: i32,
                     },
                     VarDecl {
-                        decl: val,
+                        decl: var,
                         name: 'arr',
                         type: []i32,
                     },
                     VarDecl {
-                        decl: val,
+                        decl: var,
                         name: 'tuple',
                         type: (i32, []i32, &Foo),
                     },
                     VarDecl {
-                        decl: val,
+                        decl: var,
                         name: 'generic',
                         type: Foo(Bar, i32, []i32),
                     },
                     VarDecl {
-                        decl: val,
+                        decl: var,
                         name: 'nullable',
                         type: ?i32,
                     },
