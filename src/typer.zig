@@ -661,6 +661,8 @@ const Typer = struct {
     }
     
     fn typeEnumDeclMember(self: *Typer, scope: *Scope, decl: *const ast.EnumDecl, enum_typ: *Type) void {
+        self.symbol_manager.pushNamespace(self.getTokenText(decl.name));
+        
         var new_scope = scope.inherit();
         defer new_scope.deinit();
         
@@ -671,6 +673,12 @@ const Typer = struct {
         
         for (decl.members, 0..) |mem, i| {
             switch (mem.value) {
+                .var_decl => |var_decl| {
+                    const tast_var_decl = self.typeVarDecl(&new_scope, &var_decl, mem.span);
+                    std.debug.assert(tast_var_decl == .var_decl);
+                    
+                    self.var_decls.append(self.allocator, tast_var_decl.var_decl) catch unreachable;
+                },
                 .fn_decl => |fn_decl| {
                     var fn_typ: *const Type = undefined;
                     const tast_fn_decl = self.typeFnDecl(&new_scope, &fn_decl, &fn_typ);
@@ -699,6 +707,10 @@ const Typer = struct {
         }
         
         self.fn_decls.appendSlice(self.allocator, self.collectAndFreeTempList(tast.FnDecl, &fn_decls)) catch unreachable;
+        
+        scope.setChildSymbols(enum_typ.value.@"enum".name.text, new_scope.makeChildSymbols(self.allocator));
+        
+        self.symbol_manager.popNamespace();
     }
     
     fn typeVarDecl(self: *Typer, scope: *Scope, var_decl: *const ast.VarDecl, span: TokenSpan) tast.Stmt {
@@ -1784,7 +1796,7 @@ const Typer = struct {
             .typ => {
                 switch (callee.typ.value.typ.child.value) {
                     .@"enum" => {
-                        return self.typeEnumItem(callee.typ.value.typ.child, mem.member);
+                        return self.typeEnumItem(scope, callee.typ.value.typ.child, mem.member);
                     },
                     .@"struct" => |struct_typ| {
                         return self.typeStructStaticMember(scope, &struct_typ, mem.member);
@@ -1908,7 +1920,6 @@ const Typer = struct {
     }
     
     fn typeEnumValue(self: *Typer, scope: *Scope, val: *const ast.EnumValue, span: TokenSpan, exp_typ: *const Type) tast.Expr {
-        _ = scope;
         _ = span;
         
         if (exp_typ.value != .@"enum") {
@@ -1919,35 +1930,45 @@ const Typer = struct {
             };
         }
         
-        return self.typeEnumItem(exp_typ, val.item);
+        return self.typeEnumItem(scope, exp_typ, val.item);
     }
     
-    fn typeEnumItem(self: *Typer, enum_typ: *const Type, member: Token) tast.Expr {
+    fn typeEnumItem(self: *Typer, scope: *Scope, enum_typ: *const Type, member: Token) tast.Expr {
         const member_text = self.getTokenText(member);
-        var item_index: ?usize = null;
+        
+        std.debug.assert(enum_typ.value == .@"enum");
         
         for (enum_typ.value.@"enum".items, 0..) |item, i| {
             if (std.mem.eql(u8, member_text, item.text)) {
-                item_index = i;
-                break;
+                return .{
+                    .typ = enum_typ,
+                    .value = .{.enum_value = .{ .item_index = i }},
+                };
             }
         }
         
-        if (item_index == null) {
-            self.reporter.reportErrorAtToken(
-                member,
-                "Enum `{s}` doesn't have item `{s}`",
-                .{
-                    enum_typ.value.@"enum".name.text,
-                    member_text,
-                }
-            );
+        const enum_symbol = scope.get(enum_typ.value.@"enum".name.text);
+        std.debug.assert(enum_symbol != null and enum_symbol.?.typ.value == .typ and enum_symbol.?.typ.value.typ.child.value == .@"enum");
+        
+        if (enum_symbol.?.child_symbols) |child_symbols| {
+            const symbol = child_symbols.get(member_text);
+            
+            if (symbol) |sym| {
+                return .{
+                    .typ = sym.typ,
+                    .value = .{.identifier = .{ .name = sym.symbol }},
+                };
+            }
         }
         
-        return .{
-            .typ = enum_typ,
-            .value = .{.enum_value = .{ .item_index = item_index.? }},
-        };
+        self.reporter.reportErrorAtToken(
+            member,
+            "Enum `{s}` doesn't have item or member `{s}`",
+            .{
+                enum_typ.value.@"enum".name.text,
+                member_text,
+            }
+        );
     }
     
     fn typeEnumMember(self: *Typer, scope: *Scope, callee: *tast.Expr, member: Token, is_reference: bool) tast.Expr {

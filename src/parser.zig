@@ -615,7 +615,7 @@ const Parser = struct {
                 TokenKind.CloseCurlyBracket => break,
                 TokenKind.KeywordVar,
                 TokenKind.KeywordVal,
-                TokenKind.KeywordConst => mode = .fn_decl,
+                TokenKind.KeywordConst => mode = .var_decl,
                 TokenKind.KeywordFn => mode = .fn_decl,
                 TokenKind.KeywordStruct => mode = .struct_decl,
                 TokenKind.KeywordPub => {
@@ -688,7 +688,7 @@ const Parser = struct {
                         ast.Kind.fn_decl,
                         ast.Kind.struct_decl => {},
                         else => {
-                            self.reporter.reportErrorAtSpan(expr.span, "Only function & struct declaration allowed inside struct", .{});
+                            self.reporter.reportErrorAtSpan(expr.span, "Only fields, variable, function & struct declaration are allowed inside struct", .{});
                         }
                     }
                     
@@ -724,52 +724,76 @@ const Parser = struct {
         
         var items = std.ArrayList(Token).empty;
         var members = std.ArrayList(ast.Expr).empty;
-        var has_comma = true;
-        var items_done = false;
+        
+        const Mode = enum {
+            unknown,
+            item,
+            var_decl,
+            fn_decl,
+            struct_decl,
+        };
+        
+        var mode: Mode = .unknown;
         
         while (self.ts.hasNext()) {
             switch (self.ts.peek().kind) {
                 TokenKind.CloseCurlyBracket => break,
-                TokenKind.KeywordFn => items_done = true,
+                TokenKind.KeywordVar,
+                TokenKind.KeywordVal,
+                TokenKind.KeywordConst => mode = .var_decl,
+                TokenKind.KeywordFn => mode = .fn_decl,
                 TokenKind.KeywordPub => {
-                    if (self.hasFnNext()) {
-                        items_done = true;
+                    if (self.hasVarDeclNext()) {
+                        mode = .var_decl;
+                    }
+                    else if (self.hasFnNext()) {
+                        mode = .fn_decl;
+                    }
+                    else if (self.hasStructNext()) {
+                        mode = .struct_decl;
                     }
                     else {
                         self.reporter.reportErrorAtToken(self.ts.peekN(2), "Invalid pub modifier", .{});
                     }
                 },
+                TokenKind.Identifier => {
+                    mode = .item;
+                },
                 
-                else => {}
+                else => {
+                    mode = .unknown;
+                }
             }
             
-            if (!items_done) {
-                if (!has_comma) {
-                    self.reporter.reportErrorAfterToken(self.ts.current(), "Expected comma", .{});
-                }
+            switch (mode) {
+                .unknown => {
+                    self.reporter.reportErrorAtToken(self.ts.peek(), "Only items, variable, function & struct declaration are allowed inside enum", .{});
+                },
+                .item => {
+                    items.append(self.temp_allocator, self.ts.nextExpect(.Identifier)) catch unreachable;
                 
-                items.append(self.temp_allocator, self.ts.nextExpect(.Identifier)) catch unreachable;
-                
-                if (self.ts.peek().kind == .Comma) {
-                    _ = self.ts.next();
-                    has_comma = true;
-                }
-                else {
-                    has_comma = false;
-                }
-            }
-            else {
-                const expr = self.parseExpr();
-                
-                // Only function & struct declaration allowed inside struct
-                switch (expr.value) {
-                    ast.Kind.fn_decl => {},
-                    else => {
-                        self.reporter.reportErrorAtSpan(expr.span, "Only function declaration allowed inside enum", .{});
+                    if (self.ts.peek().kind == .Comma) {
+                        _ = self.ts.next();
                     }
-                }
+                    else {
+                        self.reporter.reportErrorAfterToken(self.ts.current(), "Expected comma", .{});
+                    }
+                },
+                else => {
+                    const expr = self.parseExpr();
                 
-                members.append(self.temp_allocator, expr) catch unreachable;
+                    // Only var_decl, function & struct declaration allowed inside struct
+                    switch (expr.value) {
+                        ast.Kind.var_decl,
+                        ast.Kind.fn_decl,
+                        ast.Kind.struct_decl => {},
+                        else => {
+                            self.reporter.reportErrorAtSpan(expr.span, "Only items, variable, function & struct declaration are allowed inside enum", .{});
+                        }
+                    }
+                    
+                    members.append(self.temp_allocator, expr) catch unreachable;
+                },
             }
         }
         

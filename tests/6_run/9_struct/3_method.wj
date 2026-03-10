@@ -1,0 +1,20 @@
+struct Point {
+    x: i32
+    y: i32
+    z = 30
+    
+    fn print(self: Point) {
+        printf("x = %d, y = %d, z = %d\n", self.x, self.y, self.z)
+    }
+}
+
+fn main() {
+    const p = Point.{10, 20}
+    p.print()
+}
+
+extern fn printf(fmt: string, ...args: any)
+
+/***
+x = 10, y = 20, z = 30
+***/

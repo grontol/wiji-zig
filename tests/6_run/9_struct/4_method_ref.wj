@@ -1,0 +1,27 @@
+struct Point {
+    x: i32
+    y: i32
+    z = 30
+    
+    fn inc(self: &Point) {
+        self.x += 1
+        self.y += 1
+        self.z += 1
+    }
+    
+    fn print(self: Point) {
+        printf("x = %d, y = %d, z = %d\n", self.x, self.y, self.z)
+    }
+}
+
+fn main() {
+    val p = Point.{10, 20}
+    p.inc()
+    p.print()
+}
+
+extern fn printf(fmt: string, ...args: any)
+
+/***
+x = 11, y = 21, z = 31
+***/

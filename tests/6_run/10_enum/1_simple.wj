@@ -1,0 +1,18 @@
+enum Kind {
+    player,
+    enemy,
+}
+
+fn main() {
+    const k = Kind.player
+    
+    if k == .player {
+        printf("k is player\n")
+    }
+}
+
+extern fn printf(fmt: string, ...args: any)
+
+/***
+k is player
+***/

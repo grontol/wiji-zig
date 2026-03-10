@@ -1,0 +1,37 @@
+enum Kind {
+    var PREFIX = "YOYOYO => "
+    
+    player,
+    enemy,
+    
+    fn print(self: Kind, name: string) {
+        if self == .player {
+            printf("%s%s is player\n", PREFIX, name)
+        }
+        else if self == .enemy {
+            printf("%s%s is enemy\n", PREFIX, name)
+        }
+    }
+}
+
+fn main() {
+    const p = Kind.player
+    const e: Kind = .enemy
+    
+    p.print("p")
+    e.print("e")
+    
+    Kind.PREFIX = "====> "
+    
+    p.print("p")
+    e.print("e")
+}
+
+extern fn printf(fmt: string, ...args: any)
+
+/***
+YOYOYO => p is player
+YOYOYO => e is enemy
+====> p is player
+====> e is enemy
+***/

@@ -1,0 +1,48 @@
+struct Point {
+    var times = 3
+    
+    x: i32
+    y: i32
+    z = 30
+    
+    const INC = 10
+    
+    fn incAndPrint(self: &Point) {
+        self.x += INC
+        self.y += INC
+        self.z += INC
+        
+        self.print()
+    }
+    
+    fn timesAndPrint(self: &Point) {
+        self.x *= times
+        self.y *= times
+        self.z *= times
+        
+        self.print()
+        
+        times += 1
+    }
+    
+    fn print(self: Point) {
+        printf("x = %d, y = %d, z = %d\n", self.x, self.y, self.z)
+    }
+}
+
+fn main() {
+    val p = Point.{10, 20}
+    p.incAndPrint()
+    p.timesAndPrint()
+    p.timesAndPrint()
+    p.timesAndPrint()
+}
+
+extern fn printf(fmt: string, ...args: any)
+
+/***
+x = 20, y = 30, z = 40
+x = 60, y = 90, z = 120
+x = 240, y = 360, z = 480
+x = 1200, y = 1800, z = 2400
+***/

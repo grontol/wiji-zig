@@ -1,0 +1,30 @@
+struct Point {
+    x: i32
+    y: i32
+    z = 30
+    
+    const INC = 10
+    
+    fn incAndPrint(self: &Point) {
+        self.x += INC
+        self.y += INC
+        self.z += INC
+        
+        self.print()
+    }
+    
+    fn print(self: Point) {
+        printf("x = %d, y = %d, z = %d\n", self.x, self.y, self.z)
+    }
+}
+
+fn main() {
+    val p = Point.{10, 20}
+    p.incAndPrint()
+}
+
+extern fn printf(fmt: string, ...args: any)
+
+/***
+x = 20, y = 30, z = 40
+***/

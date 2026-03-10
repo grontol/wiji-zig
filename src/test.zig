@@ -38,7 +38,7 @@ pub fn main() !void {
     try collectTest(allocator, "tests/1_lexer", .lexer, &entries);
     try collectTest(allocator, "tests/2_parser", .parser, &entries);
     try collectTest(allocator, "tests/3_typer", .typer, &entries);
-    try collectTest(allocator, "tests/6_output", .run_output, &entries);
+    try collectTest(allocator, "tests/6_run", .run_output, &entries);
     
     std.mem.sort(TestEntry, entries.items, {}, struct {
         fn lessThan(_: void, a: TestEntry, b: TestEntry) bool {
