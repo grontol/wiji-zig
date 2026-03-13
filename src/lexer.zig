@@ -151,6 +151,7 @@ const Lexer = struct {
         else if (std.mem.eql(u8, text, "true"))      { self.pushToken(TokenKind.TrueLit, start, end); }
         else if (std.mem.eql(u8, text, "false"))     { self.pushToken(TokenKind.FalseLit, start, end); }
         else if (std.mem.eql(u8, text, "dyn"))       { self.pushToken(TokenKind.KeywordDyn, start, end); }
+        else if (std.mem.eql(u8, text, "using"))     { self.pushToken(TokenKind.KeywordUsing, start, end); }
         else                                         { self.pushToken(TokenKind.Identifier, start, end); }
     }
     

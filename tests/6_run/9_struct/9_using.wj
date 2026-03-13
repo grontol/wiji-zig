@@ -1,17 +1,15 @@
-import "std.wj"
-
 struct Object {
     name = "OBJECT"
     
     fn toString(self: &Object) {
-        printf("toString\n")
+        printf("name = %s\n", self.name)
     }
 }
 
 struct Entity {
-    using obj: Object
     x: i32
     y: i32
+    using obj: Object = .{}
     
     fn draw(self: &Entity) {
         printf("Entity: x = %d, y = %d, name = %s\n", self.x, self.y, self.name)
@@ -26,11 +24,22 @@ struct Player {
 struct Enemy {
     using entity: Entity
     damage: i32
+    
+    fn new(): Enemy {
+        const e = Enemy.{
+            entity = .{20, 30},
+            damage = 20,
+        }
+        
+        e.name = "ENEMY"
+        
+        return e
+    }
 }
 
 fn main() {
     const p = Player.{
-        entity = .{.{}, 10, 20},
+        entity = .{10, 20},
         point = 10
     }
     
@@ -39,4 +48,18 @@ fn main() {
     
     p.name = "SOOOOO"
     printf("Name = %s\n", p.name)
+    
+    const e = Enemy.new()
+    e.draw()
+    e.toString()
 }
+
+extern fn printf(fmt: string, ...args: any)
+
+/***
+Entity: x = 10, y = 20, name = OBJECT
+name = OBJECT
+Name = SOOOOO
+Entity: x = 20, y = 30, name = ENEMY
+name = ENEMY
+***/

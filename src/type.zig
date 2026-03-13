@@ -84,6 +84,7 @@ pub const TypeStructField = struct {
     typ: *const Type,
     offset: usize,
     default_value: ?*anyopaque,
+    is_using: bool,
 };
 
 pub const TypeMethod = struct {
@@ -93,6 +94,8 @@ pub const TypeMethod = struct {
 
 pub const TypeStruct = struct {
     name: Symbol,
+    field_map: std.StringHashMap(usize),
+    method_map: std.StringHashMap(usize),
     fields: []TypeStructField,
     methods: []const TypeMethod,
     state: enum {
@@ -100,6 +103,22 @@ pub const TypeStruct = struct {
         calculating,
         done,
     },
+    
+    pub fn setFields(self: *TypeStruct, fields: []TypeStructField) void {
+        for (fields, 0..) |field, i| {
+            self.field_map.put(field.name.text, i) catch unreachable;
+        }
+        
+        self.fields = fields;
+    }
+    
+    pub fn setMethods(self: *TypeStruct, methods: []const TypeMethod) void {
+        for (methods, 0..) |method, i| {
+            self.method_map.put(method.name.text, i) catch unreachable;
+        }
+        
+        self.methods = methods;
+    }
     
     pub fn calculate(self: *TypeStruct, reporter: *const Reporter) void {
         self.state = .calculating;
@@ -581,6 +600,8 @@ pub const TypeManager = struct {
             .hash = self.cur_index,
             .value = .{.@"struct" = .{
                 .name = name,
+                .field_map = .init(self.arena),
+                .method_map = .init(self.arena),
                 .fields = &.{},
                 .methods = &.{},
                 .state = .unresolved,
@@ -592,64 +613,6 @@ pub const TypeManager = struct {
         self.cur_index += 1;
         
         return new_typ_ptr;
-    }
-    
-    pub fn createStruct(self: *TypeManager, name: Symbol, fields: []TypeStructField, methods: []const TypeMethod) *Type {
-        var h = combineHash(@intFromEnum(TypeKind.@"struct"), fields.len);
-        h = combineHashWithString(h, name.text);
-        
-        var size: u16 = 0;
-        var alignment: u16 = 0;
-        
-        for (fields) |*field| {
-            h = combineHash(h, field.typ.hash);
-            
-            const field_size = field.typ.size;
-            
-            if (field_size > 0 and size % field_size > 0) {
-                size += field_size - (size % field_size);
-            }
-            
-            field.offset = size;
-            
-            if (field_size > alignment) {
-                alignment = field_size;
-            }
-            
-            size += field_size;
-        }
-        
-        if (alignment > 0 and size % alignment > 0) {
-            size += alignment - (size % alignment);
-        }
-        
-        const typ = Type{
-            .kind = .@"struct",
-            .size = size,
-            .alignment = alignment,
-            .type_id = self.cur_index,
-            .hash = h,
-            .value = .{.@"struct" = .{
-                .name = name,
-                .fields = fields,
-                .methods = methods,
-            }},
-        };
-        
-        const typ_ptr = self.type_map.get(typ);
-        
-        if (typ_ptr) |ptr| {
-            return ptr;
-        }
-        else {
-            const new_typ_ptr = self.arena.create(Type) catch unreachable;
-            new_typ_ptr.* = typ;
-            self.cur_index += 1;
-            
-            self.type_map.put(typ, new_typ_ptr) catch unreachable;
-            
-            return new_typ_ptr;
-        }
     }
     
     pub fn createEnum(self: *TypeManager, name: Symbol, items: []Symbol, methods: []const TypeMethod) *Type {

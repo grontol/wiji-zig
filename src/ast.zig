@@ -91,6 +91,7 @@ pub const StructField = struct {
     name: Token,
     typ: ?Type,
     default_value: ?*Expr,
+    using: ?Token,
 };
 
 pub const EnumDecl = struct {

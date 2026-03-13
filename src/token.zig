@@ -31,6 +31,7 @@ pub const TokenKind = enum(u16) {
     KeywordExtern,
     KeywordReturn,
     KeywordDyn,
+    KeywordUsing,
     
     OpenParen = TAG_SYMBOL << 8,
     CloseParen,

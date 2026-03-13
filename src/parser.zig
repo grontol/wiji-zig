@@ -632,6 +632,14 @@ const Parser = struct {
                         self.reporter.reportErrorAtToken(self.ts.peekN(2), "Invalid pub modifier", .{});
                     }
                 },
+                TokenKind.KeywordUsing => {
+                    if (self.ts.peekN(2).kind == .Identifier and (self.ts.peekN(3).kind == .Colon or self.ts.peekN(3).kind == .Eq)) {
+                        mode = .field;
+                    }
+                    else {
+                        self.reporter.reportErrorAtToken(self.ts.peek(), "`using` must be followed by field declaration", .{});
+                    }
+                },
                 TokenKind.Identifier => {
                     if (self.ts.peekN(2).kind == .Colon or self.ts.peekN(2).kind == .Eq) {
                         mode = .field;
@@ -651,6 +659,12 @@ const Parser = struct {
                     self.reporter.reportErrorAtToken(self.ts.peek(), "Only fields, variable, function & struct declaration are allowed inside struct", .{});
                 },
                 .field => {
+                    var using_token: ?Token = null;
+                    
+                    if (self.ts.peek().kind == .KeywordUsing) {
+                        using_token = self.ts.next();
+                    }
+                    
                     const field_name_token = self.ts.nextExpect(.Identifier);
                     var field_typ: ?ast.Type = null;
                     var field_default_value: ?*ast.Expr = null;
@@ -673,6 +687,7 @@ const Parser = struct {
                         .name = field_name_token,
                         .typ = field_typ,
                         .default_value = field_default_value,
+                        .using = using_token,
                     }) catch unreachable;
                     
                     if (self.ts.peek().kind == .Comma) {

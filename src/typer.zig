@@ -522,10 +522,11 @@ const Typer = struct {
                 .typ = field_typ,
                 .default_value = field_default_value,
                 .offset = 0,
+                .is_using = field.using != null,
             });
         }
         
-        struct_typ.value.@"struct".fields = fields.items;
+        struct_typ.value.@"struct".setFields(fields.items);
     }
     
     fn typeStructDeclMember(self: *Typer, scope: *Scope, decl: *const ast.StructDecl, struct_typ: *Type) void {
@@ -567,7 +568,7 @@ const Typer = struct {
             }
         }
         
-        struct_typ.value.@"struct".methods = self.collectAndFreeTempList(types.TypeMethod, &methods);
+        struct_typ.value.@"struct".setMethods(self.collectAndFreeTempList(types.TypeMethod, &methods));
         self.fn_decls.appendSlice(self.temp_allocator, self.collectAndFreeTempList(FnDeclData, &fn_decl_datas)) catch unreachable;
         scope.parent.?.setChildSymbols(struct_typ.value.@"struct".name.text, scope.makeChildSymbols(self.arena));
         
@@ -1783,65 +1784,101 @@ const Typer = struct {
         _ = scope;
         
         const callee_typ = if (is_reference) callee.typ.value.reference.child else callee.typ;
-        const struct_typ = callee_typ.value.@"struct";
         const member_text = self.getTokenText(member);
         
-        for (struct_typ.fields, 0..) |field, i| {
-            if (std.mem.eql(u8, field.name.text, member_text)) {
-                const typ = field.typ;
+        const Inner = struct {
+            fn allocateCallee(typer: *Typer, callee_: *tast.Expr, should_allocate: bool) *tast.Expr {
+                if (should_allocate) {
+                    return typer.makeExprPointer(callee_.*);
+                }
                 
-                return .{
-                    .typ = typ,
-                    .value = .{.struct_member = .{
-                        .callee = callee,
-                        .member_index = i,
-                    }},
-                };
+                return callee_;
             }
-        }
-        
-        for (struct_typ.methods, 0..) |method, i| {
-            if (std.mem.eql(u8, method.name.text, member_text)) {
-                var actual_callee = callee;
+            
+            fn typeStructMemberInner(
+                typer: *Typer,
+                callee_typ_: *const Type,
+                callee_: *tast.Expr,
+                member_text_: []const u8,
+                should_allocate: bool,
+            ) ?tast.Expr {
+                const struct_typ = callee_typ_.value.@"struct";
                 
-                if (method.typ.value.func.params[0].value == .reference) {
-                    if (callee.typ.value == .@"struct") {
-                        const reference_typ = self.type_manager.createReference(callee.typ);
+                if (struct_typ.field_map.get(member_text_)) |index| {
+                    return .{
+                        .typ = struct_typ.fields[index].typ,
+                        .value = .{.struct_member = .{
+                            .callee = allocateCallee(typer, callee_, should_allocate),
+                            .member_index = index,
+                        }},
+                    };
+                }
+                
+                if (struct_typ.method_map.get(member_text_)) |index| {
+                    const method = struct_typ.methods[index];
+                    var actual_callee = allocateCallee(typer, callee_, should_allocate);
                         
-                        actual_callee = self.makeExprPointer(.{
-                            .value = .{
-                                .referenc_of = .{
-                                    .value = callee,
-                                    .typ = reference_typ,
-                                }
-                            },
-                            .typ = reference_typ,
-                        });
+                    if (method.typ.value.func.params[0].value == .reference) {
+                        if (callee_.typ.value == .@"struct") {
+                            const reference_typ = typer.type_manager.createReference(callee_.typ);
+                            
+                            actual_callee = typer.makeExprPointer(.{
+                                .value = .{
+                                    .referenc_of = .{
+                                        .value = actual_callee,
+                                        .typ = reference_typ,
+                                    }
+                                },
+                                .typ = reference_typ,
+                            });
+                        }
                     }
+                    else if (callee_.typ.value == .reference) {
+                        if (method.typ.value.func.params[0].value == .@"struct") {
+                            actual_callee = typer.makeExprPointer(.{
+                                .value = .{
+                                    .dereferenc_of = .{
+                                        .value = actual_callee,
+                                        .typ = callee_.typ.value.reference.child,
+                                    }
+                                },
+                                .typ = callee_.typ.value.reference.child,
+                            });
+                        }
+                    }
+                    
+                    return .{
+                        .typ = method.typ,
+                        .value = .{.struct_method = .{
+                            .callee = actual_callee,
+                            .method_index = index,
+                            .struct_typ = callee_typ_,
+                        }},
+                    };
                 }
-                else if (callee.typ.value == .reference) {
-                    if (method.typ.value.func.params[0].value == .@"struct") {
-                        actual_callee = self.makeExprPointer(.{
-                            .value = .{
-                                .dereferenc_of = .{
-                                    .value = callee,
-                                    .typ = callee.typ.value.reference.child,
-                                }
-                            },
-                            .typ = callee.typ.value.reference.child,
-                        });
+                
+                for (struct_typ.fields, 0..) |field, i| {
+                    if (field.is_using and field.typ.value == .@"struct") {
+                        var member_callee: tast.Expr = .{
+                            .typ = field.typ,
+                            .value = .{.struct_member = .{
+                                .callee = allocateCallee(typer, callee_, should_allocate),
+                                .member_index = i,
+                            }},
+                        };
+                        
+                        if (typeStructMemberInner(typer, field.typ, &member_callee, member_text_, true)) |expr| {
+                            return expr;
+                        }
                     }
                 }
                 
-                return .{
-                    .typ = method.typ,
-                    .value = .{.struct_method = .{
-                        .callee = actual_callee,
-                        .method_index = i,
-                        .struct_typ = callee_typ,
-                    }},
-                };
+                return null;
             }
+        };
+        
+        if (Inner.typeStructMemberInner(self, callee_typ, callee, member_text, false)) |expr| {
+            return expr;
         }
         
         self.reporter.reportErrorAtToken(
