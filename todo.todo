@@ -1,6 +1,11 @@
 ✔ CGen namespacing (module/struct/enum) @done(26-03-10 10:36)
 ✔ Variable declaration inside struct (var or const) @done(26-03-10 10:36)
-☐ AKses struct variable & static function dari luar (mungkin pake Struct::VAR / Struct::funct())
-☐ "Static" function inside struct
+✔ Add comptime known flag on expr (for ++ or ** and maybe others) @done(26-03-12 00:58)
+✔ AKses struct variable & static function dari luar (mungkin pake Struct::VAR / Struct::funct()) @done(26-03-12 00:59)
+✔ "Static" function inside struct @done(26-03-12 00:58)
+✔ Struct cross reference masih belum jalan @done(26-03-12 04:20)
+✔ Analyze struct field circular dependency (soalnya bakal produce infitine size) @done(26-03-12 04:20)
 ☐ Check import symbol collision (sementara bakal ke-resolve yang terakhir diimport)
 ☐ Check variable const-ness (for assignment or something else)
+☐ Analyze identifier usage, kalau gak kepake gak usah generate
+☐ Struct "inheritance", intinya kalau sebuah struct punya field dari struct lain yang ditandai dengan "using", maka bisa dipakai sebagai pointer dari struct lain tersebut

@@ -514,6 +514,7 @@ const Cgen = struct {
             .cast          => |cast|    { self.genCast(&cast); },
             .referenc_of   => |refof|   { self.genReferenceOf(&refof); },
             .dereferenc_of => |derefof| { self.genDereferenceOf(&derefof); },
+            .string_concat => |str_cat| { self.genStringConcat(&str_cat); },
             .builtin       => |builtin| { self.genBuiltin(&builtin, &.{}); },
             
             else => {
@@ -671,6 +672,12 @@ const Cgen = struct {
         self.write("*(");
         self.genExpr(refof.value);
         self.write(")");
+    }
+    
+    fn genStringConcat(self: *Cgen, str_cat: *const tast.StringConcat) void {
+        self.genExpr(str_cat.lhs);
+        self.write(" ");
+        self.genExpr(str_cat.rhs);
     }
     
     fn genRepeat(self: *Cgen, repeat: *const tast.Repeat) void {

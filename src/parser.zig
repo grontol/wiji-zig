@@ -29,13 +29,13 @@ const precedence_map = blk: {
 };
 
 const TokenStream = struct {
-    reporter: Reporter,
+    reporter: *const Reporter,
     tokens: []const Token,
     eof_token: Token,
     current_index: usize,
     mark_index: usize,
     
-    fn init(reporter: Reporter, tokens: []const Token) TokenStream {
+    fn init(reporter: *const Reporter, tokens: []const Token) TokenStream {
         return .{
             .reporter = reporter,
             .tokens = tokens,
@@ -135,7 +135,7 @@ const Parser = struct {
     allocator: std.mem.Allocator,
     temp_allocator: std.mem.Allocator,
     file_manager: *const FileManager,
-    reporter: Reporter,
+    reporter: *const Reporter,
     ts: TokenStream,
     
     imports: std.ArrayList(ast.Import) = .empty,
@@ -144,7 +144,7 @@ const Parser = struct {
         allocator: std.mem.Allocator,
         temp_allocator: std.mem.Allocator,
         file_manager: *const FileManager,
-        reporter: Reporter,
+        reporter: *const Reporter,
         tokens: []const Token,
     ) Parser {
         return .{
@@ -1497,7 +1497,7 @@ const Parser = struct {
     }
 };
 
-pub fn parse(allocator: std.mem.Allocator, file_manager: *const FileManager, reporter: Reporter, tokens: []const Token) ast.Module {
+pub fn parse(allocator: std.mem.Allocator, file_manager: *const FileManager, reporter: *const Reporter, tokens: []const Token) ast.Module {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const temp_allocator = gpa.allocator();
     defer std.debug.assert(gpa.deinit() == .ok);

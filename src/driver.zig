@@ -29,7 +29,7 @@ pub const Driver = struct {
     file_manager: *FileManager,
     symbol_manager: *SymbolManager,
     type_manaager: *TypeManager,
-    reporter: Reporter,
+    reporter: *Reporter,
     
     module_map: std.StringHashMap(ModuleId),
     modules: std.ArrayList(*Module),
@@ -39,10 +39,13 @@ pub const Driver = struct {
         file_manager.* = FileManager.init(allocator);
         
         const symbol_manager = allocator.create(SymbolManager) catch unreachable;
-        symbol_manager.* = SymbolManager.init(allocator);
+        symbol_manager.* = SymbolManager.init(allocator, file_manager);
         
         const type_manager = allocator.create(TypeManager) catch unreachable;
         type_manager.* = TypeManager.init(allocator, allocator);
+        
+        const reporter = allocator.create(Reporter) catch unreachable;
+        reporter.* = Reporter.init(file_manager, options);
         
         return .{
             .allocator = allocator,
@@ -51,7 +54,7 @@ pub const Driver = struct {
             .file_manager = file_manager,
             .symbol_manager = symbol_manager,
             .type_manaager = type_manager,
-            .reporter = Reporter.init(file_manager, options),
+            .reporter = reporter,
             .module_map = std.StringHashMap(usize).init(allocator),
             .modules = .empty,
         };

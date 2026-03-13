@@ -1,40 +1,5 @@
 import "std.wj"
 
-struct Foo {
-    var SOMETHING = 20
-    
-    x: i32
-    
-    fn print(self: &Foo) {
-        printf("foo = %d\n", self.x)
-        printf("SOMETHING = %d\n", SOMETHING)
-    }
-    
-    fn hee() {
-        printf("HEEEEE\n")
-    }
-}
-
-struct Bar {
-    const SOMETHING = 30
-    
-    x: i32
-    
-    fn print(self: &Bar) {
-        printf("foo = %d\n", self.x)
-        printf("SOMETHING = %d\n", SOMETHING)
-    }
-}
-
 fn main() {
-    val foo = Foo.{1}
-    val bar = Bar.{2}
     
-    foo.print()
-    bar.print()
-    
-    Foo.SOMETHING = 666
-    printf("SOMETHING = %d\n", Foo.SOMETHING)
-    Foo.hee()
-    Foo.print(&foo)
 }

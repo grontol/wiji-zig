@@ -110,13 +110,13 @@ const Lexer = struct {
     
     chs: Chars,
     tokens: std.ArrayList(Token),
-    reporter: Reporter,
+    reporter: *const Reporter,
     
     line: usize = 1,
     col: usize = 1,
     has_nl_before: bool = false,
     
-    fn init(allocator: std.mem.Allocator, reporter: Reporter, file_id: usize, src: []const u8) !Lexer {
+    fn init(allocator: std.mem.Allocator, reporter: *const Reporter, file_id: usize, src: []const u8) !Lexer {
         return .{
             .allocator = allocator,
             .file_id = file_id,
@@ -387,7 +387,7 @@ const Lexer = struct {
     }
 };
 
-pub fn tokenize(allocator: std.mem.Allocator, reporter: Reporter, file_id: usize, src: []const u8) ![]Token {
+pub fn tokenize(allocator: std.mem.Allocator, reporter: *const Reporter, file_id: usize, src: []const u8) ![]Token {
     var lexer = try Lexer.init(allocator, reporter, file_id, src);
     var ch: u8 = lexer.chs.next();
     

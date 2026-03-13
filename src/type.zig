@@ -1,5 +1,7 @@
 const std = @import("std");
+const Token = @import("token.zig").Token;
 const Symbol = @import("symbol.zig").Symbol;
+const Reporter = @import("reporter.zig");
 
 const TYPE_FLAG_INT       = (1 << (8 + 0));
 const TYPE_FLAG_UNSIGNED  = (1 << (8 + 1));
@@ -91,8 +93,56 @@ pub const TypeMethod = struct {
 
 pub const TypeStruct = struct {
     name: Symbol,
-    fields: []const TypeStructField,
+    fields: []TypeStructField,
     methods: []const TypeMethod,
+    state: enum {
+        unresolved,
+        calculating,
+        done,
+    },
+    
+    pub fn calculate(self: *TypeStruct, reporter: *const Reporter) void {
+        self.state = .calculating;
+        
+        var size: u16 = 0;
+        var alignment: u16 = 0;
+        
+        for (self.fields) |*field| {
+            if (field.typ.value == .@"struct") {
+                const child_struct_ptr: *TypeStruct = @constCast(&field.typ.value.@"struct");
+                
+                if (child_struct_ptr.state == .calculating) {
+                    reporter.reportErrorAtToken(
+                        field.name.token,
+                        "Recursive struct field requires indirection. Consider using a reference `&{s}`",
+                        .{field.typ.value.@"struct".name.text}
+                    );
+                }
+                
+                child_struct_ptr.calculate(reporter);
+            }
+            
+            const field_size = field.typ.size;
+            
+            if (field_size > 0 and size % field_size > 0) {
+                size += field_size - (size % field_size);
+            }
+            
+            field.offset = size;
+            
+            if (field_size > alignment) {
+                alignment = field_size;
+            }
+            
+            size += field_size;
+        }
+        
+        if (alignment > 0 and size % alignment > 0) {
+            size += alignment - (size % alignment);
+        }
+        
+        self.state = .done;
+    }
 };
 
 pub const TypeEnum = struct {
@@ -522,6 +572,28 @@ pub const TypeManager = struct {
         }
     }
     
+    pub fn createStructForward(self: *TypeManager, name: Symbol) *Type {
+        const typ = Type{
+            .kind = .@"struct",
+            .size = 0,
+            .alignment = 0,
+            .type_id = self.cur_index,
+            .hash = self.cur_index,
+            .value = .{.@"struct" = .{
+                .name = name,
+                .fields = &.{},
+                .methods = &.{},
+                .state = .unresolved,
+            }},
+        };
+        
+        const new_typ_ptr = self.arena.create(Type) catch unreachable;
+        new_typ_ptr.* = typ;
+        self.cur_index += 1;
+        
+        return new_typ_ptr;
+    }
+    
     pub fn createStruct(self: *TypeManager, name: Symbol, fields: []TypeStructField, methods: []const TypeMethod) *Type {
         var h = combineHash(@intFromEnum(TypeKind.@"struct"), fields.len);
         h = combineHashWithString(h, name.text);
@@ -534,7 +606,7 @@ pub const TypeManager = struct {
             
             const field_size = field.typ.size;
             
-            if (size % field_size > 0) {
+            if (field_size > 0 and size % field_size > 0) {
                 size += field_size - (size % field_size);
             }
             

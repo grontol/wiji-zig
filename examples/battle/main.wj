@@ -7,21 +7,14 @@ fn main() {
     setTargetFPS(60)
     initWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Battle")
     
-    const textGreen = loadTexture("examples/battle/assets/green.png")
-    
-    val e = Entity.{
-        x = 100,
-        y = 100,
-        w = 100,
-        h = 100,
-        img = textGreen,
-        kind = .player,
-    }
+    Entity.init()
+    val e = Entity.createPlayer(SCREEN_WIDTH / 2 as f32, SCREEN_HEIGHT - 100 as f32)
     
     while !windowShouldClose() {
         beginDrawing()
         clearBackground(GRAY)
         
+        e.update()
         e.draw()
         
         drawFPS(20, 20)
@@ -37,15 +30,58 @@ enum EntityKind {
     bullet,
 }
 
+struct Player {
+    entity: Entity
+    
+    fn new(x: f32, y: f32): Player {
+        return .{
+            entity = Entity.createPlayer(x, y)
+        }
+    }
+}
+
 struct Entity {
-    x: i32
-    y: i32
+    const ASSETS_DIR = "examples/battle/assets/"
+    const PLAYER_MOVE_SPEED = 3.0
+    
+    var textPlayer: Texture
+    var textRed: Texture
+    var textGreen: Texture
+    var textYellow: Texture
+    
+    x: f32
+    y: f32
     w: i32
     h: i32
     kind: EntityKind
     img: Texture
     
-    // var foo = 10
+    fn init() {
+        textPlayer = loadTexture(ASSETS_DIR ++ "player.png")
+        textRed = loadTexture(ASSETS_DIR ++ "red.png")
+        textGreen = loadTexture(ASSETS_DIR ++ "green.png")
+        textYellow = loadTexture(ASSETS_DIR ++ "yellow.png")
+    }
+    
+    fn createPlayer(x: f32, y: f32): Entity {
+        return .{
+            x = x,
+            y = y,
+            w = textPlayer.width,
+            h = textPlayer.height,
+            img = textPlayer,
+            kind = .player,
+        }
+    }
+    
+    fn update(self: &Entity) {
+        if self.kind == .player {
+            self.updatePlayer()
+        }
+        else if self.kind == .enemy {
+            
+        }
+    }
     
     fn draw(self: &Entity) {
         drawTexturePro(
@@ -56,5 +92,14 @@ struct Entity {
             0,
             WHITE,
         )
+    }
+    
+    fn updatePlayer(self: &Entity) {
+        if isKeyDown(KEY_A) {
+            self.x -= PLAYER_MOVE_SPEED
+        }
+        else if isKeyDown(KEY_D) {
+            self.x += PLAYER_MOVE_SPEED
+        }
     }
 }

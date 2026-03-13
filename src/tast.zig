@@ -220,6 +220,11 @@ pub const DereferenceOf = struct {
     typ: *const Type,
 };
 
+pub const StringConcat = struct {
+    lhs: *Expr,
+    rhs: *Expr,
+};
+
 pub const BuiltinKind = enum {
     array_len,
     dynarray_append,
@@ -302,6 +307,7 @@ pub const ExprKind = enum {
     referenc_of,
     dereferenc_of,
     block,
+    string_concat,
     builtin,
     invalid,
 };
@@ -326,10 +332,12 @@ pub const Expr = struct {
         referenc_of: ReferenceOf,
         dereferenc_of: DereferenceOf,
         block: BlockExpr,
+        string_concat: StringConcat,
         builtin: Builtin,
         invalid,
     },
     typ: *const Type,
+    comptime_known: bool = false,
 };
 
 pub const Printer = struct {

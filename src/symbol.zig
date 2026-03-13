@@ -1,41 +1,49 @@
 const std = @import("std");
 const Type = @import("type.zig").Type;
+const Token = @import("token.zig").Token;
+const FileManager = @import("file_manager.zig");
 
 pub const Symbol = struct {
     id: usize,
     text: []const u8,
     namespaces: []const []const u8,
+    token: Token,
 };
 
 pub const TypedSymbol = struct {
     symbol: Symbol,
     typ: *const Type,
+    comptime_known: bool,
     child_symbols: ?*std.StringHashMap(TypedSymbol),
 };
 
 pub const SymbolManager = struct {
     allocator: std.mem.Allocator,
+    file_manager: *const FileManager,
     name_map: std.StringHashMap([]const u8),
     name_list: StringList,
     global_index: usize,
     namespaces: std.ArrayList([]const u8) = .empty,
     
-    pub fn init(allocator: std.mem.Allocator) SymbolManager {
+    pub fn init(allocator: std.mem.Allocator, file_manager: *const FileManager) SymbolManager {
         return .{
             .allocator = allocator,
+            .file_manager = file_manager,
             .name_map = std.StringHashMap([]const u8).init(allocator),
             .name_list = StringList.init(allocator),
             .global_index = 0,
         };
     }
     
-    pub fn createSymbol(self: *SymbolManager, name: []const u8, namespaced: bool) Symbol {
+    pub fn createSymbol(self: *SymbolManager, name_token: Token, namespaced: bool) Symbol {
+        const name = self.file_manager.getTokenText(name_token);
         const namespaces = if (namespaced) self.allocator.dupe([]const u8, self.namespaces.items) catch unreachable
         else &.{};
         
         const sym = Symbol{
             .id = self.global_index,
             .text = self.createName(name),
+            .token = name_token,
             .namespaces = namespaces,
         };
         
