@@ -235,6 +235,16 @@ pub const Type = struct {
                         else => return false,
                     }
                 }
+                else if (self.value.numeric.isInt()) {
+                    if (other.value.numeric.isInt() and other.value.numeric.isUntyped()) {
+                        return true;
+                    }
+                }
+                else if (self.value.numeric.isFloat()) {
+                    if (other.value.numeric.isFloat() and other.value.numeric.isUntyped()) {
+                        return true;
+                    }
+                }
                 
                 // TODO: Check for numeric coercion
                 return false;
@@ -248,6 +258,10 @@ pub const Type = struct {
                 return self.value.array.child.isSame(other.value.array.child);
             },
             TypeKind.@"enum" => { return false; },
+            TypeKind.@"struct" => { return false; },
+            TypeKind.reference => {
+                return self.value.reference.child.canBeAssignedTo(other.value.reference.child);
+            },
             
             else => {
                 std.debug.panic("TODO: Type.canBeAssignedTo {s}", .{@tagName(self.kind)});
@@ -418,6 +432,10 @@ pub const Type = struct {
                         out.appendSlice(allocator, ", ") catch unreachable;
                     }
                     
+                    if (self.value.func.is_variadic and i == self.value.func.params.len - 1) {
+                        out.appendSlice(allocator, "...") catch unreachable;
+                    }
+                    
                     param.getText(out, allocator);
                 }
                 
@@ -439,8 +457,7 @@ pub const Type = struct {
             },
             
             TypeKind.typ => {
-                out.print(allocator, "{s}", .{@tagName(self.value.typ.child.value)}) catch unreachable;
-                out.appendSlice(allocator, "(") catch unreachable;
+                out.print(allocator, "type({s}:", .{@tagName(self.value.typ.child.value)}) catch unreachable;
                 self.value.typ.child.getText(out, allocator);
                 out.appendSlice(allocator, ")") catch unreachable;
             },
@@ -616,19 +633,12 @@ pub const TypeManager = struct {
     }
     
     pub fn createEnum(self: *TypeManager, name: Symbol, items: []Symbol, methods: []const TypeMethod) *Type {
-        var h = combineHash(@intFromEnum(TypeKind.@"struct"), items.len);
-        h = combineHashWithString(h, name.text);
-        
-        for (items) |item| {
-            h = combineHashWithString(h, item.text);
-        }
-        
         const typ = Type{
             .kind = .@"enum",
             .size = 8,
             .alignment = 8,
             .type_id = self.cur_index,
-            .hash = h,
+            .hash = self.cur_index,
             .value = .{.@"enum" = .{
                 .name = name,
                 .items = items,
@@ -636,20 +646,13 @@ pub const TypeManager = struct {
             }},
         };
         
-        const typ_ptr = self.type_map.get(typ);
+        const new_typ_ptr = self.arena.create(Type) catch unreachable;
+        new_typ_ptr.* = typ;
+        self.cur_index += 1;
         
-        if (typ_ptr) |ptr| {
-            return ptr;
-        }
-        else {
-            const new_typ_ptr = self.arena.create(Type) catch unreachable;
-            new_typ_ptr.* = typ;
-            self.cur_index += 1;
-            
-            self.type_map.put(typ, new_typ_ptr) catch unreachable;
-            
-            return new_typ_ptr;
-        }
+        self.type_map.put(typ, new_typ_ptr) catch unreachable;
+        
+        return new_typ_ptr;
     }
     
     pub fn createType(self: *TypeManager, child: *const Type) *const Type {

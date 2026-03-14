@@ -1,0 +1,19 @@
+const FOO = Foo.{10}
+
+struct Foo {
+    x: i32
+    
+    fn print(self: @Self) {
+        printf("x = %d\n", self.x)
+    }
+}
+
+fn main() {
+    FOO.print()
+}
+
+extern fn printf(fmt: string, ...args: any)
+
+/***
+x = 10
+***/

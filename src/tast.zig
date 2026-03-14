@@ -247,6 +247,7 @@ pub const StmtKind = enum {
     for_each,
     whil,
     returns,
+    breaq,
     expr,
     noop,
 };
@@ -262,6 +263,7 @@ pub const Stmt = union(StmtKind) {
     for_each: ForEach,
     whil: While,
     returns: Return,
+    breaq,
     expr: Expr,
     noop,
     

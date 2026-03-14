@@ -7,7 +7,15 @@
 ✔ Analyze struct field circular dependency (soalnya bakal produce infitine size) @done(26-03-12 04:20)
 ✔ Struct "inheritance", intinya kalau sebuah struct punya field dari struct lain yang ditandai dengan "using", maka bisa dipakai sebagai pointer dari struct lain tersebut @done(26-03-13 22:41)
 ✔ Check variable const-ness (for assignment or something else) @done(26-03-14 20:27)
+✔ Inline enum & struct @done(26-03-15 03:08)
 ☐ check struct "using" field & methods collision
 ☐ Check import symbol collision (sementara bakal ke-resolve yang terakhir diimport)
 ☐ Analyze identifier usage, kalau gak kepake gak usah generate
 ☐ Scope masih nge-leak, gak di-free sama sekali
+☐ Function default argument
+☐ Enum field & member StringHashmap
+☐ Generic function
+
+BUG:
+    ✔ Bug kalau unary + binary `!x && y`, jadinya malah `!(x && y)` @done(26-03-14 22:38)
+    ☐ foreach kalau gak reference (for x in xs), variable x jadi constant. Terus `const` kalau di-reference tetep `const`. Soalnya bikin bug

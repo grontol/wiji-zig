@@ -1,1 +1,3 @@
 extern pub fn printf(fmt: string, ...args: any)
+
+extern pub fn rand(): i32

@@ -260,6 +260,7 @@ const Cgen = struct {
             .for_range  => |for_range| { self.genForRange(&for_range); has_semicolon = false; },
             .for_each   => |for_each|  { self.genForEach(&for_each); has_semicolon = false; },
             .block      => |block|     { self.genBlock(&block, dont_create_block); has_semicolon = false; has_newline = false; },
+            .breaq      => |_|         { self.genBreak(); },
             
             else => {
                 std.debug.panic("TODO: genStmt {s}", .{@tagName(stmt.*)});
@@ -294,6 +295,10 @@ const Cgen = struct {
             self.writeIndent();
             self.write("}}");
         }
+    }
+    
+    fn genBreak(self: *Cgen) void {
+        self.write("break");
     }
     
     fn genVarDecl(self: *Cgen, decl: *const tast.VarDecl, is_top_level: bool) void {
@@ -891,22 +896,23 @@ fn execAndWait(allocator: std.mem.Allocator, cmd: []const []const u8, out: ?*[]c
 
 fn execAndWaitStreaming(allocator: std.mem.Allocator, cmd: []const []const u8) !bool {
     var proc = std.process.Child.init(cmd, allocator);
-    proc.stdout_behavior = .Pipe;
-    proc.stderr_behavior = .Pipe;
+    proc.stdout_behavior = .Inherit;
+    proc.stderr_behavior = .Inherit;
     try proc.spawn();
     
-    var buffer: [1024]u8 = undefined;
-    var stdout_buffer: [1024]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
-    const writer = &stdout_writer.interface;
+    // var buffer: [1024]u8 = undefined;
+    // var stdout_buffer: [1024]u8 = undefined;
+    // var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+    // const writer = &stdout_writer.interface;
     
-    while (true) {
-        const bytes_read = try proc.stdout.?.read(&buffer);        
-        if (bytes_read == 0) break;
+    // while (true) {
+    //     const bytes_read = try proc.stdout.?.read(&buffer);
+    //     if (bytes_read == 0) break;
         
-        writer.print("{s}", .{buffer[0..bytes_read]}) catch unreachable;
-        writer.flush() catch unreachable;
-    }    
+    //     writer.writeAll(buffer[0..bytes_read]) catch unreachable;
+    //     // writer.print("{s}", .{buffer[0..bytes_read]}) catch unreachable;
+    //     writer.flush() catch unreachable;
+    // }    
     
     const term = try proc.wait();
     

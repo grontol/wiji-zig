@@ -1,0 +1,31 @@
+struct Foo {
+    x: i32
+    kind: enum {
+        one,
+        two,
+        
+        fn foo(self: @Self) {
+            if self == .one {
+                printf("is one\n")
+            }
+            else {
+                printf("is two\n")
+            }
+        }
+    }
+}
+
+fn main() {
+    const f = Foo.{
+        x = 10,
+        kind = .two,
+    }
+    
+    f.kind.foo()
+}
+
+extern fn printf(fmt: string, ...args: any)
+
+/***
+is two
+***/

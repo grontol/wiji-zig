@@ -1,0 +1,26 @@
+struct Foo {
+    x: i32
+    using bar: struct {
+        y: i32
+        z: i32
+        
+        fn barz(self: @Self) {
+            printf("y = %d, z = %d\n", self.y, self.z)
+        }
+    }
+}
+
+fn main() {
+    const f = Foo.{
+        x = 10,
+        bar = .{10, 20}
+    }
+    
+    f.barz()
+}
+
+extern fn printf(fmt: string, ...args: any)
+
+/***
+y = 10, z = 20
+***/

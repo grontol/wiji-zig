@@ -1,0 +1,67 @@
+struct Foo {
+    x = 10
+    
+    fn foo() {}
+    fn bar(self: &Foo) {}
+    fn baz(self: Foo, v: i32) {}
+}
+
+enum Human {
+    boy,
+    girl,
+    
+    fn foo() {}
+    fn bar(self: Human) {}
+    fn baz(self: Human, v: i32) {}
+}
+
+fn main() {
+    const x = 1
+    const y = 2.0
+    const foo = Foo.{}
+    const human = Human.boy
+    const str = "STRING"
+    const chr = 'c'
+    
+    printf("@typeOf(1) = %s\n", @typeOf(1))
+    printf("@typeOf(2.3) = %s\n", @typeOf(2.3))
+    printf("@typeOf(x) = %s\n", @typeOf(x))
+    printf("@typeOf(y) = %s\n", @typeOf(y))
+    printf("@typeOf(foo) = %s\n", @typeOf(foo))
+    printf("@typeOf(str) = %s\n", @typeOf(str))
+    printf("@typeOf(chr) = %s\n", @typeOf(chr))
+    printf("@typeOf(Foo) = %s\n", @typeOf(Foo))
+    printf("@typeOf(Foo.foo) = %s\n", @typeOf(Foo.foo))
+    printf("@typeOf(Foo.bar) = %s\n", @typeOf(Foo.bar))
+    printf("@typeOf(Foo.baz) = %s\n", @typeOf(Foo.baz))
+    printf("@typeOf(foo.x) = %s\n", @typeOf(foo.x))
+    printf("@typeOf(human) = %s\n", @typeOf(human))
+    printf("@typeOf(Human) = %s\n", @typeOf(Human))
+    printf("@typeOf(Human.foo) = %s\n", @typeOf(Human.foo))
+    printf("@typeOf(Human.bar) = %s\n", @typeOf(Human.bar))
+    printf("@typeOf(Human.baz) = %s\n", @typeOf(Human.baz))
+    printf("@typeOf(printf) = %s\n", @typeOf(printf))
+}
+
+extern fn printf(fmt: string, ...args: any)
+
+/***
+@typeOf(1) = int
+@typeOf(2.3) = float
+@typeOf(x) = i32
+@typeOf(y) = f32
+@typeOf(foo) = Foo
+@typeOf(str) = string
+@typeOf(chr) = char
+@typeOf(Foo) = type(struct:Foo)
+@typeOf(Foo.foo) = fn(): void
+@typeOf(Foo.bar) = fn(&Foo): void
+@typeOf(Foo.baz) = fn(Foo, i32): void
+@typeOf(foo.x) = i32
+@typeOf(human) = Human
+@typeOf(Human) = type(enum:Human)
+@typeOf(Human.foo) = fn(): void
+@typeOf(Human.bar) = fn(Human): void
+@typeOf(Human.baz) = fn(Human, i32): void
+@typeOf(printf) = fn(string, ...any): void
+***/

@@ -134,6 +134,7 @@ const Lexer = struct {
         if (std.mem.eql(u8, text, "fn"))             { self.pushToken(TokenKind.KeywordFn, start, end); }
         else if (std.mem.eql(u8, text, "for"))       { self.pushToken(TokenKind.KeywordFor, start, end); }
         else if (std.mem.eql(u8, text, "while"))     { self.pushToken(TokenKind.KeywordWhile, start, end); }
+        else if (std.mem.eql(u8, text, "break"))     { self.pushToken(TokenKind.KeywordBreak, start, end); }
         else if (std.mem.eql(u8, text, "in"))        { self.pushToken(TokenKind.KeywordIn, start, end); }
         else if (std.mem.eql(u8, text, "if"))        { self.pushToken(TokenKind.KeywordIf, start, end); }
         else if (std.mem.eql(u8, text, "else"))      { self.pushToken(TokenKind.KeywordElse, start, end); }

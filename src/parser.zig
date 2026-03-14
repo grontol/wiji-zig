@@ -299,14 +299,12 @@ const Parser = struct {
             exprs.clearAndFree(self.temp_allocator);
             ops.clearAndFree(self.temp_allocator);
         }
-        
-        if (self.ts.peek().kind == .DotDot) {
-            expr = self.parseRange(expr);
-        }
-        
-        if (self.ts.peek().kind == .KeywordAs) {
-            expr = self.parseCast(expr);
-        }
+        // else if (self.ts.peek().kind == .DotDot) {
+        //     expr = self.parseRange(expr);
+        // }
+        // else if (self.ts.peek().kind == .KeywordAs) {
+        //     expr = self.parseCast(expr);
+        // }
         
         return expr;
     }
@@ -369,7 +367,6 @@ const Parser = struct {
                             }
                         },
                         TokenKind.Dot => expr = self.parseMemberAccess(expr),
-                        // TokenKind.DotDot => expr = self.parseRange(expr),
                         TokenKind.OpenSqBracket => expr = self.parseArrayIndex(expr),
                         else => break,
                     }
@@ -406,6 +403,7 @@ const Parser = struct {
             },
             TokenKind.KeywordFor => expr = self.parseFor(),
             TokenKind.KeywordWhile => expr = self.parseWhile(),
+            TokenKind.KeywordBreak => expr = self.parseBreak(),
             TokenKind.KeywordIf => expr = self.parseIf(),
             TokenKind.KeywordVal,
             TokenKind.KeywordVar,
@@ -433,7 +431,7 @@ const Parser = struct {
                     self.reporter.reportErrorAtToken(self.ts.next(), "Invalid dot", .{});
                 }
             },
-            TokenKind.At => std.debug.panic("TODO: Parse intrinsic", .{}),
+            TokenKind.At => { expr = self.parseIntinsic(); },
             TokenKind.KeywordReturn => { expr = self.parseReturn(); },
             TokenKind.Not,
             TokenKind.Minus => { expr = self.parseUnary(); },
@@ -447,6 +445,12 @@ const Parser = struct {
             else => {
                 std.debug.panic("Not Implemented : parsePrimaryExpr {s}", .{@tagName(kind)});
             },
+        }
+        
+        switch (self.ts.peek().kind) {
+            TokenKind.DotDot => expr = self.parseRange(expr),
+            TokenKind.KeywordAs => expr = self.parseCast(expr),
+            else => {}
         }
         
         return expr;
@@ -593,7 +597,12 @@ const Parser = struct {
         }
         
         const struct_token = self.ts.nextExpect(.KeywordStruct);
-        const name_token = self.ts.nextExpect(.Identifier);
+        
+        var name_token: ?Token = null;
+        
+        if (self.ts.peek().kind == .Identifier) {
+            name_token = self.ts.next();
+        }
         
         _ = self.ts.nextExpect(.OpenCurlyBracket);
         
@@ -719,6 +728,7 @@ const Parser = struct {
             .value = .{.struct_decl = .{
                 .is_public = pub_token != null,
                 .name = name_token,
+                .struct_token = struct_token,
                 .fields = self.collectAndFreeTempList(ast.StructField, &fields),
                 .members = self.collectAndFreeTempList(ast.Expr, &members),
             }},
@@ -733,7 +743,12 @@ const Parser = struct {
         }
         
         const enum_token = self.ts.nextExpect(.KeywordEnum);
-        const name_token = self.ts.nextExpect(.Identifier);
+        
+        var name_token: ?Token = null;
+        
+        if (self.ts.peek().kind == .Identifier) {
+            name_token = self.ts.nextExpect(.Identifier);
+        }
         
         _ = self.ts.nextExpect(.OpenCurlyBracket);
         
@@ -819,6 +834,7 @@ const Parser = struct {
             .value = .{.enum_decl = .{
                 .is_public = pub_token != null,
                 .name = name_token,
+                .enum_token = enum_token,
                 .items = self.collectAndFreeTempList(Token, &items),
                 .members = self.collectAndFreeTempList(ast.Expr, &members),
             }},
@@ -954,6 +970,15 @@ const Parser = struct {
         };
     }
     
+    fn parseBreak(self: *Parser) ast.Expr {
+        const break_token = self.ts.nextExpect(.KeywordBreak);
+        
+        return .{
+            .span = TokenSpan.from_token(break_token),
+            .value = .breaq,
+        };
+    }
+    
     fn parseIf(self: *Parser) ast.Expr {
         const if_token = self.ts.nextExpect(.KeywordIf);
         const condition = self.makeExprPointer(self.parseExpr());
@@ -985,7 +1010,7 @@ const Parser = struct {
             else => { std.debug.panic("Invalid unary operator {s}", .{@tagName(op.kind)}); },
         }
         
-        const expr = self.makeExprPointer(self.parseExpr());
+        const expr = self.makeExprPointer(self.parsePrimaryExpr());
         
         return .{
             .span = TokenSpan.from_token_and_span(op, expr.span),
@@ -1265,6 +1290,42 @@ const Parser = struct {
         };
     }
     
+    fn parseIntinsic(self: *Parser) ast.Expr {
+        const at_token = self.ts.nextExpect(.At);
+        const name_token = self.ts.nextExpect(.Identifier);
+        
+        var args: std.ArrayList(ast.Expr) = .empty;
+        var has_comma = true;
+        
+        _ = self.ts.nextExpect(.OpenParen);
+        
+        while (self.ts.peek().kind != .CloseParen) {
+            if (!has_comma) {
+                self.reporter.reportErrorAtToken(self.ts.current(), "Expected comma", .{});
+            }
+            
+            args.append(self.temp_allocator, self.parseExpr()) catch unreachable;
+            
+            if (self.ts.peek().kind == .Comma) {
+                _ = self.ts.next();
+                has_comma = true;
+            }
+            else {
+                has_comma = false;
+            }
+        }
+        
+        const close_paren_token = self.ts.nextExpect(.CloseParen);
+        
+        return ast.Expr{
+            .value = .{ .intrinsic = .{
+                .name = name_token,
+                .args = self.collectAndFreeTempList(ast.Expr, &args),
+            } },
+            .span = TokenSpan.from_tokens(at_token, close_paren_token),
+        };
+    }
+    
     fn parseType(self: *Parser) ast.Type {
         var typ: ast.Type = undefined;
         
@@ -1422,6 +1483,38 @@ const Parser = struct {
                     },
                     .span = TokenSpan.from_tokens(oparen_token, cparen_token),
                 };
+            },
+            TokenKind.KeywordStruct => {
+                const struct_decl = self.parseStructDecl();
+                
+                typ = ast.Type{
+                    .span = struct_decl.span,
+                    .value = .{ .inline_struct = struct_decl.value.struct_decl, },
+                };
+            },
+            TokenKind.KeywordEnum => {
+                const enum_decl = self.parseEnumDecl();
+                
+                typ = ast.Type{
+                    .span = enum_decl.span,
+                    .value = .{ .inline_enum = enum_decl.value.enum_decl, }
+                };
+            },
+            TokenKind.At => {
+                if (self.ts.peekN(2).kind == .Identifier) {
+                    const at_token = self.ts.next();
+                    const name = self.ts.next();
+                    
+                    if (std.mem.eql(u8, self.getTokenText(name), "Self")) {
+                        typ = ast.Type{
+                            .span = TokenSpan.from_tokens(at_token, name),
+                            .value = .self,
+                        };
+                    }
+                    else {
+                        self.reporter.reportErrorAtToken(name, "Invalid intrinsic type. Only `@Self` is supported, it refers to the containing type (struct or enum).", .{});
+                    }
+                }
             },
             
             else => {

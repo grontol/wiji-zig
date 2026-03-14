@@ -31,6 +31,7 @@ pub const SymbolManager = struct {
     name_list: StringList,
     global_index: usize,
     namespaces: std.ArrayList([]const u8) = .empty,
+    unnamed_index: usize = 0,
     
     pub fn init(allocator: std.mem.Allocator, file_manager: *const FileManager) SymbolManager {
         return .{
@@ -51,6 +52,26 @@ pub const SymbolManager = struct {
             .id = self.global_index,
             .text = self.createName(name),
             .token = name_token,
+            .namespaces = namespaces,
+        };
+        
+        self.global_index += 1;
+        
+        return sym;
+    }
+    
+    pub fn createUnnamedSymbol(self: *SymbolManager, prefix: []const u8, placeholder_token: Token, namespaced: bool) Symbol {
+        const index = self.unnamed_index;
+        self.unnamed_index += 1;
+        
+        const name = std.fmt.allocPrint(self.allocator, "_{s}_{}", .{prefix, index}) catch unreachable;
+        const namespaces = if (namespaced) self.allocator.dupe([]const u8, self.namespaces.items) catch unreachable
+        else &.{};
+        
+        const sym = Symbol{
+            .id = self.global_index,
+            .text = self.createName(name),
+            .token = placeholder_token,
             .namespaces = namespaces,
         };
         

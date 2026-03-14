@@ -79,6 +79,8 @@ const Typer = struct {
     fn_decls: std.ArrayList(FnDeclData) = .empty,
     
     cur_fn: ?*tast.FnDecl = null,
+    cur_breakable: ?*tast.Stmt = null,
+    cur_container_type: ?*const Type = null,
     
     fn init(
         arena: std.mem.Allocator,
@@ -264,6 +266,7 @@ const Typer = struct {
             .whil       => |whil|   { return self.typeWhile(scope, &whil); },
             .forr       => |forr|   { return self.typeFor(scope, &forr); },
             .block      => |block|  { return self.typeBlockStmt(scope, &block, dont_create_new_scope); },
+            .breaq      => |_|      { return self.typeBreak(stmt.span); },
             
             else => {
                 if (stmt.canBeUsedAsExpr()) {
@@ -466,14 +469,23 @@ const Typer = struct {
         };
     }
     
+    fn typeBreak(self: *Typer, span: TokenSpan) tast.Stmt {
+        if (self.cur_breakable) |_| {
+            return .breaq;
+        }
+        else {
+            self.reporter.reportErrorAtSpan(span, "`break` can only be placed inside `for` or `while` loop", .{});
+        }
+    }
+    
     fn typeStructDeclForward(self: *Typer, scope: *Scope, decl: *const ast.StructDecl) StructDeclData {
-        const struct_name = self.getTokenText(decl.name);
-        const struct_symbol = self.symbol_manager.createSymbol(decl.name, true);
+        const struct_symbol = if (decl.name) |name| self.symbol_manager.createSymbol(name, true)
+        else self.symbol_manager.createUnnamedSymbol("inline_struct", decl.struct_token, true);
         
         const struct_type = self.type_manager.createStructForward(struct_symbol);
         const struct_type_container = self.type_manager.createType(struct_type);
         
-        scope.set(struct_name, struct_symbol, struct_type_container, true, .constant);
+        scope.set(struct_symbol.text, struct_symbol, struct_type_container, true, .constant);       
         const new_scope = scope.inheritWithMode(.container, self.arena);
         
         return .{
@@ -519,6 +531,10 @@ const Typer = struct {
                 unreachable;
             }
             
+            if (field.using != null and field_typ.value != .@"struct") {
+                self.reporter.reportErrorAtToken(field.using.?, "`using` can only be applied to field with type of `struct`", .{});
+            }
+            
             fields.appendAssumeCapacity(types.TypeStructField{
                 .name = field_name_symbol,
                 .typ = field_typ,
@@ -532,10 +548,22 @@ const Typer = struct {
     }
     
     fn typeStructDeclMember(self: *Typer, scope: *Scope, decl: *const ast.StructDecl, struct_typ: *Type) void {
-        self.symbol_manager.pushNamespace(self.getTokenText(decl.name));
+        std.debug.assert(struct_typ.value == .@"struct");
+        
+        self.symbol_manager.pushNamespace(struct_typ.value.@"struct".name.text);
+        const cur_container_type = self.cur_container_type;
+        self.cur_container_type = struct_typ;
         
         var methods = std.ArrayList(types.TypeMethod).empty;
+        
         var fn_decl_datas = std.ArrayList(FnDeclData).empty;
+        defer fn_decl_datas.clearAndFree(self.temp_allocator);
+        
+        var struct_decl_datas = std.ArrayList(StructDeclData).empty;
+        defer struct_decl_datas.clearAndFree(self.temp_allocator);
+        
+        var enum_decl_datas = std.ArrayList(EnumDeclData).empty;
+        defer enum_decl_datas.clearAndFree(self.temp_allocator);
         
         for (decl.members, 0..) |mem, i| {
             switch (mem.value) {
@@ -563,6 +591,18 @@ const Typer = struct {
                         .scope = scope,
                     }) catch unreachable;
                 },
+                .struct_decl => {
+                    struct_decl_datas.append(
+                        self.temp_allocator,
+                        self.typeStructDeclForward(scope, &decl.members[i].value.struct_decl),
+                    ) catch unreachable;
+                },
+                .enum_decl => {
+                    enum_decl_datas.append(
+                        self.temp_allocator,
+                        self.typeEnumDecl(scope, &decl.members[i].value.enum_decl),
+                    ) catch unreachable;
+                },
                 
                 else => {
                     self.reporter.reportErrorAtSpan(mem.span, "Invalid struct member", .{});
@@ -570,16 +610,40 @@ const Typer = struct {
             }
         }
         
+        for (struct_decl_datas.items) |struct_decl_data| {
+            self.typeStructDeclFields(struct_decl_data.scope, struct_decl_data.ast, struct_decl_data.typ);
+        }
+        
+        for (struct_decl_datas.items) |struct_decl_data| {
+            self.typeStructDeclMember(struct_decl_data.scope, struct_decl_data.ast, struct_decl_data.typ);
+        }
+        
+        for (enum_decl_datas.items) |enum_decl_data| {
+            self.typeEnumDeclMember(enum_decl_data.scope, enum_decl_data.ast, enum_decl_data.typ);
+        }
+        
+        // Calculate structs size & alignment
+        for (struct_decl_datas.items) |struct_decl_data| {
+            struct_decl_data.typ.value.@"struct".calculate(self.reporter);
+        }
+        
+        for (fn_decl_datas.items) |*fn_decl_data| {
+            if (fn_decl_data.tast.is_extern) {
+                self.reporter.reportErrorAtSpan(fn_decl_data.span, "extern function must be placed at top level", .{});
+            }
+        }
+        
         struct_typ.value.@"struct".setMethods(self.collectAndFreeTempList(types.TypeMethod, &methods));
-        self.fn_decls.appendSlice(self.temp_allocator, self.collectAndFreeTempList(FnDeclData, &fn_decl_datas)) catch unreachable;
+        self.fn_decls.appendSlice(self.temp_allocator, fn_decl_datas.items) catch unreachable;
         scope.parent.?.setChildSymbols(struct_typ.value.@"struct".name.text, scope.makeChildSymbols(self.arena));
         
+        self.cur_container_type = cur_container_type;
         self.symbol_manager.popNamespace();
     }
     
     fn typeEnumDecl(self: *Typer, scope: *Scope, decl: *const ast.EnumDecl) EnumDeclData {
-        const enum_name = self.getTokenText(decl.name);
-        const enum_symbol = self.symbol_manager.createSymbol(decl.name, true);
+        const enum_symbol = if (decl.name) |name| self.symbol_manager.createSymbol(name, true)
+        else self.symbol_manager.createUnnamedSymbol("inline_enum", decl.enum_token, true);
         
         var items = std.ArrayList(Symbol).initCapacity(self.arena, decl.items.len) catch unreachable;
             
@@ -595,7 +659,7 @@ const Typer = struct {
         );
         
         const enum_type_container = self.type_manager.createType(enum_type);
-        scope.set(enum_name, enum_symbol, enum_type_container, true, .constant);
+        scope.set(enum_symbol.text, enum_symbol, enum_type_container, true, .constant);        
         const new_scope = scope.inheritWithMode(.container, self.arena);
         
         return .{
@@ -606,7 +670,11 @@ const Typer = struct {
     }
     
     fn typeEnumDeclMember(self: *Typer, scope: *Scope, decl: *const ast.EnumDecl, enum_typ: *Type) void {
-        self.symbol_manager.pushNamespace(self.getTokenText(decl.name));
+        std.debug.assert(enum_typ.value == .@"enum");
+        
+        self.symbol_manager.pushNamespace(enum_typ.value.@"enum".name.text);
+        const cur_container_type = self.cur_container_type;
+        self.cur_container_type = enum_typ;
         
         var methods = std.ArrayList(types.TypeMethod).empty;
         var fn_decl_datas = std.ArrayList(FnDeclData).empty;
@@ -648,6 +716,7 @@ const Typer = struct {
         self.fn_decls.appendSlice(self.temp_allocator, self.collectAndFreeTempList(FnDeclData, &fn_decl_datas)) catch unreachable;
         scope.parent.?.setChildSymbols(enum_typ.value.@"enum".name.text, scope.makeChildSymbols(self.arena));
         
+        self.cur_container_type = cur_container_type;
         self.symbol_manager.popNamespace();
     }
     
@@ -728,15 +797,26 @@ const Typer = struct {
         const lhs = self.makeExprPointer(self.typeExpr(scope, ass.lhs, types.UNKNOWN));
         const rhs = self.makeExprPointer(self.typeExpr(scope, ass.rhs, lhs.typ));
         
+        var is_lvalue = false;
+        
         // Check if lhs is a lvalue
         switch (lhs.value) {
             .identifier,
             .array_index,
-            .struct_member => {},
+            .struct_member => {
+                is_lvalue = true;
+            },
+            .builtin => {
+                if (lhs.value.builtin == .array_len) {
+                    is_lvalue = true;
+                }
+            },
             
-            else => {
-                self.reporter.reportErrorAtSpan(ass.lhs.span, "Cannot assign to rvalue", .{});
-            }
+            else => {}
+        }
+        
+        if (!is_lvalue) {
+            self.reporter.reportErrorAtSpan(ass.lhs.span, "Cannot assign to rvalue", .{});
         }
         
         switch (lhs.mutability) {
@@ -963,14 +1043,22 @@ const Typer = struct {
             self.reporter.reportErrorAtSpan(whil.condition.span, "Type `{s}` cannot be used as condition", .{cond.typ.getTextLeak(self.arena)});
         }
         
-        const body = self.makeStmtPointer(self.typeStmt(scope, whil.body, false));
-        
-        return .{
+        var body: tast.Stmt = .noop;
+        var tast_whil: tast.Stmt = .{
             .whil = .{
                 .condition = cond,
-                .body = body,
+                .body = &body,
             },
         };
+        
+        const cur_breakable = self.cur_breakable;
+        self.cur_breakable = &tast_whil;
+        
+        tast_whil.whil.body = self.makeStmtPointer(self.typeStmt(scope, whil.body, false));
+        
+        self.cur_breakable = cur_breakable;
+        
+        return tast_whil;
     }
     
     fn typeFor(self: *Typer, scope: *Scope, forr: *const ast.For) tast.Stmt {
@@ -1150,6 +1238,7 @@ const Typer = struct {
             ast.Kind.enum_value    => return self.typeEnumValue(scope, &expr.value.enum_value, expr.span, exp_typ),
             ast.Kind.address_of    => return self.typeAddressOf(scope, &expr.value.address_of, exp_typ),
             ast.Kind.cast          => return self.typeCast(scope, &expr.value.cast, expr.span),
+            ast.Kind.intrinsic     => return self.typeIntrinsic(scope, &expr.value.intrinsic),
             
             else => {
                 std.debug.panic("TODO: typeExpr {s}", .{@tagName(expr.value)});
@@ -2002,18 +2091,19 @@ const Typer = struct {
         }
         
         const enum_symbol = scope.get(enum_typ.value.@"enum".name.text);
-        std.debug.assert(enum_symbol != null and enum_symbol.?.typ.value == .typ and enum_symbol.?.typ.value.typ.child.value == .@"enum");
         
-        if (enum_symbol.?.child_symbols) |child_symbols| {
-            const symbol = child_symbols.get(member_text);
-            
-            if (symbol) |sym| {
-                return .{
-                    .typ = sym.typ,
-                    .comptime_known = sym.comptime_known,
-                    .mutability = sym.mutability,
-                    .value = .{.identifier = .{ .name = sym.symbol }},
-                };
+        if (enum_symbol) |enum_sym| {
+            if (enum_sym.child_symbols) |child_symbols| {
+                const symbol = child_symbols.get(member_text);
+                
+                if (symbol) |sym| {
+                    return .{
+                        .typ = sym.typ,
+                        .comptime_known = sym.comptime_known,
+                        .mutability = sym.mutability,
+                        .value = .{.identifier = .{ .name = sym.symbol }},
+                    };
+                }
             }
         }
         
@@ -2103,7 +2193,7 @@ const Typer = struct {
             
             return .{
                 .typ = types.UNTYPED_INT,
-                .mutability = .constant,
+                .mutability = .mutable,
                 .value = .{.builtin = .{ .array_len = .{ .arr = ar } }}
             };
         }
@@ -2319,6 +2409,30 @@ const Typer = struct {
         };
     }
     
+    fn typeIntrinsic(self: *Typer, scope: *Scope, intr: *const ast.Intrinsic) tast.Expr {
+        const name = self.getTokenText(intr.name);
+        
+        if (std.mem.eql(u8, name, "typeOf")) {
+            if (intr.args.len == 1) {
+                const expr = self.typeExpr(scope, &intr.args[0], types.UNKNOWN);
+                const typ_str = expr.typ.getTextLeak(self.arena);
+                
+                return .{
+                    .typ = types.STRING,
+                    .comptime_known = true,
+                    .mutability = .constant,
+                    .value = .{ .literal = .{ .string = typ_str } }
+                };
+            }
+            else {
+                self.reporter.reportErrorAtToken(intr.name, "@typeOf needs exactly 1 argument", .{});
+            }            
+        }
+        else {
+            self.reporter.reportErrorAtToken(intr.name, "Unknown intrinsic `{s}`", .{name});
+        }
+    }
+    
     fn typeType(self: *Typer, scope: *Scope, typ: *const ast.Type) *const Type {
         var result_type: *const Type = undefined;
         
@@ -2371,6 +2485,31 @@ const Typer = struct {
                 result_type = self.type_manager.createReference(
                     self.typeType(scope, typ.value.reference.child)
                 );
+            },
+            ast.TypeKind.inline_struct => {
+                const struct_decl = &typ.value.inline_struct;
+                
+                const struct_decl_data = self.typeStructDeclForward(scope, struct_decl);
+                self.typeStructDeclFields(struct_decl_data.scope, struct_decl_data.ast, struct_decl_data.typ);
+                self.typeStructDeclMember(struct_decl_data.scope, struct_decl_data.ast, struct_decl_data.typ);
+                
+                result_type = struct_decl_data.typ;
+            },
+            ast.TypeKind.inline_enum => {
+                const enum_decl = &typ.value.inline_enum;
+                
+                const enum_decl_data = self.typeEnumDecl(scope, enum_decl);
+                self.typeEnumDeclMember(enum_decl_data.scope, enum_decl_data.ast, enum_decl_data.typ);
+                
+                result_type = enum_decl_data.typ;
+            },
+            ast.TypeKind.self => {
+                if (self.cur_container_type) |container_typ| {
+                    return container_typ;
+                }
+                else {
+                    self.reporter.reportErrorAtSpan(typ.span, "`@Self` type can only be used inside containers (struct or enum)", .{});
+                }
             },
             
             else => {

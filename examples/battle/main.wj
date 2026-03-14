@@ -1,21 +1,71 @@
+import "../std.wj"
 import "../raylib.wj"
 
 const SCREEN_WIDTH  = 1280
 const SCREEN_HEIGHT = 720
 
+const ASSETS_DIR = "examples/battle/assets/"
+var textPlayer: Texture
+var textRed: Texture
+var textGreen: Texture
+var textYellow: Texture
+var textBullet: Texture
+
+val bullets: [dyn]Bullet = .[]
+val enemies: [dyn]Enemy = .[]
+
 fn main() {
     setTargetFPS(60)
     initWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Battle")
     
-    Entity.init()
-    val e = Entity.createPlayer(SCREEN_WIDTH / 2 as f32, SCREEN_HEIGHT - 100 as f32)
+    textPlayer = loadTexture(ASSETS_DIR ++ "player.png")
+    textRed = loadTexture(ASSETS_DIR ++ "red.png")
+    textGreen = loadTexture(ASSETS_DIR ++ "green.png")
+    textYellow = loadTexture(ASSETS_DIR ++ "yellow.png")
+    textBullet = loadTexture(ASSETS_DIR ++ "bullet.png")
+    
+    val player = Player.new(SCREEN_WIDTH as f32 / 2, SCREEN_HEIGHT as f32 - 100)
+    spawnEnemy()
+    
+    var totalTime = 0.0
     
     while !windowShouldClose() {
+        removeDeads()
+        totalTime += getFrameTime()
+        
+        if (totalTime > 1.0) {
+            totalTime = 0
+            spawnEnemy()
+        }
+        
         beginDrawing()
         clearBackground(GRAY)
         
-        e.update()
-        e.draw()
+        player.update()
+        player.draw()
+        
+        for &bullet in bullets {
+            if !bullet.dead {
+                bullet.update()
+                bullet.draw()
+            }
+        }
+        
+        for &enemy in enemies {
+            if !enemy.dead {
+                enemy.update()
+                enemy.draw()
+            }
+        }
+        
+        for &bullet in bullets {
+            for &enemy in enemies {
+                if !enemy.dead && bullet.collidesWith(&enemy.entity) {
+                    bullet.dead = true
+                    enemy.dead = true
+                }
+            }
+        }
         
         drawFPS(20, 20)
         endDrawing()
@@ -24,62 +74,132 @@ fn main() {
     closeWindow()
 }
 
-enum EntityKind {
-    player,
-    enemy,
-    bullet,
+fn spawnBullet(x: f32, y: f32) {
+    bullets.append(Bullet.new(x, y))
+}
+
+fn spawnEnemy() {
+    const x = rand() % SCREEN_WIDTH
+    const y = rand() % SCREEN_HEIGHT / 2
+    
+    enemies.append(Enemy.new(x as f32, y as f32))
+}
+
+fn removeDeads() {
+    var i = 0
+    
+    while i < bullets.len {
+        if bullets[i].dead {
+            bullets[i] = bullets[bullets.len - 1]
+            bullets.len -= 1
+        }
+        else {
+            i += 1
+        }
+    }
+    
+    i = 0
+    
+    while i < enemies.len {
+        if enemies[i].dead {
+            enemies[i] = enemies[enemies.len - 1]
+            enemies.len -= 1
+        }
+        else {
+            i += 1
+        }
+    }
+    
+    printf("Bullet len = %d, Enemy len = %d\n", enemies.len)
 }
 
 struct Player {
-    entity: Entity
+    const MOVE_SPEED = 6.0
+    
+    using entity: Entity
     
     fn new(x: f32, y: f32): Player {
         return .{
-            entity = Entity.createPlayer(x, y)
+            entity = Entity.new(x, y, textPlayer)
+        }
+    }
+    
+    fn update(self: &Player) {
+        if isKeyDown(KEY_A) {
+            self.x -= MOVE_SPEED
+        }
+        else if isKeyDown(KEY_D) {
+            self.x += MOVE_SPEED
+        }
+        
+        if isKeyPressed(KEY_SPACE) {
+            spawnBullet(self.x, self.y)
+        }
+    }
+}
+
+struct Enemy {
+    using entity: Entity
+    dead = false
+    kind: enum {
+        one,
+        two,
+    }
+    
+    fn new(x: f32, y: f32): Enemy {
+        return .{
+            entity = Entity.new(x, y, textGreen)
+        }
+    }
+    
+    fn update(self: &Enemy) {
+        
+    }
+}
+
+struct Bullet {
+    const SPEED = 20.0
+    
+    using entity: Entity
+    dead = false
+    
+    fn new(x: f32, y: f32): Bullet {
+        return .{
+            entity = .{
+                x = x,
+                y = y - 20,
+                w = 40,
+                h = 40,
+                img = textBullet,
+                rot = -90,
+            }
+        }
+    }
+    
+    fn update(self: &Bullet) {
+        self.y -= SPEED
+        
+        if !self.dead && self.y < -100 {
+            self.dead = true
         }
     }
 }
 
 struct Entity {
-    const ASSETS_DIR = "examples/battle/assets/"
-    const PLAYER_MOVE_SPEED = 3.0
-    
-    var textPlayer: Texture
-    var textRed: Texture
-    var textGreen: Texture
-    var textYellow: Texture
-    
     x: f32
     y: f32
     w: i32
     h: i32
-    kind: EntityKind
     img: Texture
+    rot: f32 = 0
     
-    fn init() {
-        textPlayer = loadTexture(ASSETS_DIR ++ "player.png")
-        textRed = loadTexture(ASSETS_DIR ++ "red.png")
-        textGreen = loadTexture(ASSETS_DIR ++ "green.png")
-        textYellow = loadTexture(ASSETS_DIR ++ "yellow.png")
-    }
-    
-    fn createPlayer(x: f32, y: f32): Entity {
+    fn new(x: f32, y: f32, texture: Texture): Entity {
         return .{
             x = x,
             y = y,
-            w = textPlayer.width,
-            h = textPlayer.height,
-            img = textPlayer,
-            kind = .player,
-        }
-    }
-    
-    fn update(self: &Entity) {
-        if self.kind == .player {
-            self.updatePlayer()
-        }
-        else if self.kind == .enemy {
-            
+            w = texture.width,
+            h = texture.height,
+            img = texture,
         }
     }
     
@@ -87,19 +207,29 @@ struct Entity {
         drawTexturePro(
             self.img,
             .{0, 0, self.img.width as f32, self.img.height as f32},
-            .{self.x as f32, self.y as f32, self.w as f32, self.h as f32},
-            .{0, 0},
-            0,
+            .{self.x, self.y, self.w as f32, self.h as f32},
+            .{(self.w as f32) / 2, (self.h as f32) / 2},
+            self.rot,
             WHITE,
         )
     }
     
-    fn updatePlayer(self: &Entity) {
-        if isKeyDown(KEY_A) {
-            self.x -= PLAYER_MOVE_SPEED
-        }
-        else if isKeyDown(KEY_D) {
-            self.x += PLAYER_MOVE_SPEED
-        }
+    fn collidesWith(self: &Entity, other: &Entity): bool {
+        const self_l = self.x as i32 - self.w / 2
+        const self_r = self_l + self.w
+        const self_t = self.y as i32 - self.h / 2
+        const self_b = self_t + self.h
+        
+        const other_l = other.x as i32 - other.w / 2
+        const other_r = other_l + other.w
+        const other_t = other.y as i32 - other.h / 2
+        const other_b = other_t + other.h
+        
+        if self_l > other_r return false
+        if self_t > other_b return false
+        if self_r < other_l return false
+        if self_b < other_t return false
+        
+        return true
     }
 }

@@ -82,7 +82,8 @@ pub const FnParam = struct {
 
 pub const StructDecl = struct {
     is_public: bool,
-    name: Token,
+    name: ?Token,
+    struct_token: Token,
     fields: []const StructField,
     members: []const Expr,
 };
@@ -96,7 +97,8 @@ pub const StructField = struct {
 
 pub const EnumDecl = struct {
     is_public: bool,
-    name: Token,
+    name: ?Token,
+    enum_token: Token,
     items: []const Token,
     members: []const Expr,
 };
@@ -179,7 +181,10 @@ pub const Cast = struct {
     typ: Type,
 };
 
-pub const Intrinsic = struct {};
+pub const Intrinsic = struct {
+    name: Token,
+    args: []const Expr,
+};
 
 pub const Import = struct {
     path: Token,
@@ -230,6 +235,7 @@ pub const Kind = enum {
     iff,
     
     assignment,
+    breaq,
     returns,
     address_of,
     cast,
@@ -264,6 +270,7 @@ pub const Expr = struct {
         iff: If,
         
         assignment: Assignment,
+        breaq,
         returns: Return,
         address_of: AddressOf,
         cast: Cast,
@@ -308,6 +315,9 @@ pub const TypeKind = enum {
     nullable,
     tuple,
     generic,
+    inline_struct,
+    inline_enum,
+    self,
 };
 
 pub const Type = struct {
@@ -335,6 +345,9 @@ pub const Type = struct {
             name: Token,
             children: []const Type,
         },
+        inline_struct: StructDecl,
+        inline_enum: EnumDecl,
+        self,
     },
     span: TokenSpan,
 };
@@ -456,24 +469,26 @@ pub const Printer = struct {
     
     fn printExpr(self: *Printer, expr: *const Expr) void {
         switch (expr.value) {
-            Kind.fn_decl => self.printFnDecl(&expr.value.fn_decl),
-            Kind.fn_call => self.printFnCall(&expr.value.fn_call),
-            Kind.identifier => self.printIdentifier(&expr.value.identifier),
-            Kind.literal => self.printLiteral(&expr.value.literal),
-            Kind.var_decl => self.printVarDecl(&expr.value.var_decl),
-            Kind.assignment => self.printAssignment(&expr.value.assignment),
-            Kind.binary => self.printBinary(&expr.value.binary),
-            Kind.iff => self.printIf(&expr.value.iff),
-            Kind.block => self.printBlock(&expr.value.block),
-            Kind.forr => self.printFor(&expr.value.forr),
-            Kind.range => self.printRange(&expr.value.range),
-            Kind.array_value => self.printArrayValue(&expr.value.array_value),
-            Kind.array_index => self.printArrayIndex(&expr.value.array_index),
-            Kind.struct_decl => self.printStructDecl(&expr.value.struct_decl),
-            Kind.struct_value => self.printStructValue(&expr.value.struct_value),
+            Kind.fn_decl       => self.printFnDecl(&expr.value.fn_decl),
+            Kind.fn_call       => self.printFnCall(&expr.value.fn_call),
+            Kind.identifier    => self.printIdentifier(&expr.value.identifier),
+            Kind.literal       => self.printLiteral(&expr.value.literal),
+            Kind.var_decl      => self.printVarDecl(&expr.value.var_decl),
+            Kind.assignment    => self.printAssignment(&expr.value.assignment),
+            Kind.binary        => self.printBinary(&expr.value.binary),
+            Kind.iff           => self.printIf(&expr.value.iff),
+            Kind.block         => self.printBlock(&expr.value.block),
+            Kind.forr          => self.printFor(&expr.value.forr),
+            Kind.range         => self.printRange(&expr.value.range),
+            Kind.array_value   => self.printArrayValue(&expr.value.array_value),
+            Kind.array_index   => self.printArrayIndex(&expr.value.array_index),
+            Kind.struct_decl   => self.printStructDecl(&expr.value.struct_decl),
+            Kind.struct_value  => self.printStructValue(&expr.value.struct_value),
             Kind.member_access => self.printMemberAccess(&expr.value.member_access),
-            Kind.returns => self.printReturn(&expr.value.returns),
-            Kind.import => self.printImport(&expr.value.import),
+            Kind.returns       => self.printReturn(&expr.value.returns),
+            Kind.import        => self.printImport(&expr.value.import),
+            Kind.cast          => self.printCast(&expr.value.cast),
+            Kind.unary         => self.printUnary(&expr.value.unary),
             
             else => {
                 std.debug.panic("Not Implemented : print {s}", .{@tagName(expr.value)});
@@ -635,7 +650,10 @@ pub const Printer = struct {
         self.blockBegin("StructDecl");
         
         self.memberWithValue("is_public", "{}", .{decl.is_public});
-        self.memberWithValue("name", "'{s}'", .{self.tokenText(decl.name)});
+        
+        if (decl.name) |name| {
+            self.memberWithValue("name", "'{s}'", .{self.tokenText(name)});
+        }
         
         self.memberBegin("fields");
         if (decl.fields.len > 0) {
@@ -865,9 +883,31 @@ pub const Printer = struct {
     
     fn printImport(self: *Printer, imp: *const Import) void {
         self.blockBegin("Import");
-        
-        self.memberBegin("path");
         self.memberWithValue("path", "{s}", .{self.tokenText(imp.path)});
+        self.blockEnd();
+    }
+    
+    fn printCast(self: *Printer, cast: *const Cast) void {
+        self.blockBegin("Cast");
+        
+        self.memberBegin("value");
+        self.printExpr(cast.value);
+        self.memberEnd();
+        
+        self.memberBegin("type");
+        self.printType(&cast.typ);
+        self.memberEnd();
+        
+        self.blockEnd();
+    }
+    
+    fn printUnary(self: *Printer, un: *const Unary) void {
+        self.blockBegin("Unary");
+        
+        self.memberWithValue("op", "{s}", .{self.tokenText(un.op)});
+        
+        self.memberBegin("expr");
+        self.printExpr(un.expr);
         self.memberEnd();
         
         self.blockEnd();
@@ -920,6 +960,15 @@ pub const Printer = struct {
                 }
                 
                 self.print(")", .{});
+            },
+            TypeKind.inline_struct => {
+                self.print("inline_struct", .{});
+            },
+            TypeKind.inline_enum => {
+                self.print("inline_enum", .{});
+            },
+            TypeKind.self => {
+                self.print("@Self", .{});
             },
         }
     }

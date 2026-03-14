@@ -1,16 +1,17 @@
 import "std.wj"
 
+const FOO = Foo.{10}
+
 struct Foo {
-    x: i32
-    
-    fn foo(self: &Foo) {
-        self.x = 100
+    struct Bar {
+        y: i32
+        z: i32
     }
+    
+    x: i32
+    bar: Bar
 }
 
 fn main() {
-    var x = 10
-    x = 20
-    
-    printf("x = %d\n", x)
+    const f = Foo.{10}
 }

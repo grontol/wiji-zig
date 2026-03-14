@@ -16,6 +16,7 @@ pub const TokenKind = enum(u16) {
     KeywordFn = TAG_KEYWORD << 8,
     KeywordFor,
     KeywordWhile,
+    KeywordBreak,
     KeywordIn,
     KeywordIf,
     KeywordElse,
