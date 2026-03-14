@@ -1,42 +1,16 @@
 import "std.wj"
 
-struct Object {
-    name = "OBJECT"
-    
-    fn toString(self: &Object) {
-        printf("toString\n")
-    }
-}
-
-struct Entity {
-    using obj: Object
+struct Foo {
     x: i32
-    y: i32
     
-    fn draw(self: &Entity) {
-        printf("Entity: x = %d, y = %d, name = %s\n", self.x, self.y, self.name)
+    fn foo(self: &Foo) {
+        self.x = 100
     }
-}
-
-struct Player {
-    using entity: Entity
-    point: i32
-}
-
-struct Enemy {
-    using entity: Entity
-    damage: i32
 }
 
 fn main() {
-    const p = Player.{
-        entity = .{.{}, 10, 20},
-        point = 10
-    }
+    var x = 10
+    x = 20
     
-    p.draw()
-    p.toString()
-    
-    p.name = "SOOOOO"
-    printf("Name = %s\n", p.name)
+    printf("x = %d\n", x)
 }

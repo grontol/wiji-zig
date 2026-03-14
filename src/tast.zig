@@ -2,6 +2,7 @@ const std = @import("std");
 const types = @import("type.zig");
 const Symbol = @import("symbol.zig").Symbol;
 const TypedSymbol = @import("symbol.zig").TypedSymbol;
+const Mutability = @import("symbol.zig").Mutability;
 const Type = types.Type;
 
 pub const Module = struct {
@@ -338,6 +339,7 @@ pub const Expr = struct {
     },
     typ: *const Type,
     comptime_known: bool = false,
+    mutability: Mutability,
 };
 
 pub const Printer = struct {

@@ -11,6 +11,7 @@ const TypeManager = types.TypeManager;
 const Reporter = @import("reporter.zig");
 const Symbol = @import("symbol.zig").Symbol;
 const TypedSymbol = @import("symbol.zig").TypedSymbol;
+const Mutability = @import("symbol.zig").Mutability;
 const SymbolManager = @import("symbol.zig").SymbolManager;
 const FileManager = @import("file_manager.zig");
 const Scope =@import("scope.zig").Scope;
@@ -362,7 +363,7 @@ const Typer = struct {
             false,
         );
         
-        scope.set(fn_name, fn_name_symbol, fn_typ, true);
+        scope.set(fn_name, fn_name_symbol, fn_typ, true, .constant);
         
         if (out_typ) |typ| {
             typ.* = fn_typ;
@@ -384,7 +385,7 @@ const Typer = struct {
         var new_scope = scope.inheritWithMode(.local, scope.allocator);
         
         for (forward_decl.params) |param| {
-            new_scope.set(param.name.text, param.name, param.typ, false);
+            new_scope.set(param.name.text, param.name, param.typ, false, .constant);
         }
         
         const parent_fn = self.cur_fn;
@@ -448,6 +449,7 @@ const Typer = struct {
         
         return .{
             .typ = types.UNKNOWN,
+            .mutability = .constant,
             .value = .{.block = .{
                 .stmts = stmts,
                 .last_expr = last_expr,
@@ -471,7 +473,7 @@ const Typer = struct {
         const struct_type = self.type_manager.createStructForward(struct_symbol);
         const struct_type_container = self.type_manager.createType(struct_type);
         
-        scope.set(struct_name, struct_symbol, struct_type_container, true);
+        scope.set(struct_name, struct_symbol, struct_type_container, true, .constant);
         const new_scope = scope.inheritWithMode(.container, self.arena);
         
         return .{
@@ -593,7 +595,7 @@ const Typer = struct {
         );
         
         const enum_type_container = self.type_manager.createType(enum_type);
-        scope.set(enum_name, enum_symbol, enum_type_container, true);
+        scope.set(enum_name, enum_symbol, enum_type_container, true, .constant);
         const new_scope = scope.inheritWithMode(.container, self.arena);
         
         return .{
@@ -694,9 +696,16 @@ const Typer = struct {
         
         typ = typ.coerceIntoRuntime(self.type_manager);
         
-        const comtime_known = var_decl.decl.kind == .KeywordConst and value.?.comptime_known;
+        const comptime_known = var_decl.decl.kind == .KeywordConst and value.?.comptime_known;
+        const mutability: Mutability = switch (var_decl.decl.kind) {
+            .KeywordConst => .constant,
+            .KeywordVal => .immutable,
+            .KeywordVar => .mutable,
+            else => unreachable,
+        };
+        
         const name_symbol = self.symbol_manager.createSymbol(var_decl.name, scope.mode != .local);
-        scope.set(name, name_symbol, typ, comtime_known);
+        scope.set(name, name_symbol, typ, comptime_known, mutability);
         
         const kind: tast.VarDeclKind = switch (var_decl.decl.kind) {
             TokenKind.KeywordVal   => .Val,
@@ -728,6 +737,16 @@ const Typer = struct {
             else => {
                 self.reporter.reportErrorAtSpan(ass.lhs.span, "Cannot assign to rvalue", .{});
             }
+        }
+        
+        switch (lhs.mutability) {
+            .constant => {
+                self.reporter.reportErrorAtSpan(ass.lhs.span, "Cannot assign to constant", .{});
+            },
+            .immutable => {
+                self.reporter.reportErrorAtSpan(ass.lhs.span, "Cannot assign to imuutable variable", .{});
+            },
+            .mutable => {},
         }
         
         if (!rhs.typ.canBeAssignedTo(lhs.typ)) {
@@ -770,6 +789,7 @@ const Typer = struct {
         
         return .{
             .typ = tast_call.return_typ,
+            .mutability = .constant,
             .value = .{ .fn_call = tast_call },
         };
     }
@@ -927,6 +947,7 @@ const Typer = struct {
         
         return .{
             .typ = typ,
+            .mutability = .constant,
             .value = .{.iff = .{
                 .condition = cond,
                 .true_expr = self.makeExprPointer(true_expr),
@@ -996,6 +1017,7 @@ const Typer = struct {
                     if (iter.typ.canBeAssignedTo(types.I32)) {
                         start = self.makeExprPointer(.{
                             .typ = types.I32,
+                            .mutability = .constant,
                             .value = .{ .literal = .{ .int = 0 } },
                         });
                         
@@ -1021,11 +1043,13 @@ const Typer = struct {
                     if (iter.value.range.is_eq) {
                         const one = self.makeExprPointer(.{
                             .typ = types.I32,
+                            .mutability = .constant,
                             .value = .{.literal = .{ .int = 1 }},
                         });
                         
                         const bin = self.makeExprPointer(.{
                             .typ =  types.I32,
+                            .mutability = .constant,
                             .value = .{.binary = .{
                                 .lhs = end,
                                 .rhs = one,
@@ -1041,7 +1065,7 @@ const Typer = struct {
                 // defer new_scope.deinit();
                 
                 if (item_var) |v| {
-                    scope.set(v.text, v, types.I32, false);
+                    scope.set(v.text, v, types.I32, false, .constant);
                 }
                 
                 const body = self.makeStmtPointer(self.typeStmt(new_scope, forr.body, true));
@@ -1061,11 +1085,11 @@ const Typer = struct {
                 else iter.typ.value.array.child;
                 
                 if (item_var) |v| {
-                    scope.set(v.text, v, item_typ, false);
+                    scope.set(v.text, v, item_typ, false, .constant);
                 }
                 
                 if (index_var) |v| {
-                    scope.set(v.text, v, types.I32, false);
+                    scope.set(v.text, v, types.I32, false, .constant);
                 }
                 
                 const body = self.makeStmtPointer(self.typeStmt(new_scope, forr.body, true));
@@ -1142,6 +1166,7 @@ const Typer = struct {
                 .value = .{ .identifier = .{ .name = sym.symbol } },
                 .typ = sym.typ,
                 .comptime_known = sym.comptime_known,
+                .mutability = sym.mutability,
             };
         }
         
@@ -1177,6 +1202,7 @@ const Typer = struct {
                 
                 return tast.Expr{
                     .comptime_known = true,
+                    .mutability = .constant,
                     .typ = types.UNTYPED_INT,
                     .value = .{ .literal = .{ .int = value } },
                 };
@@ -1188,6 +1214,7 @@ const Typer = struct {
                 
                 return tast.Expr{
                     .comptime_known = true,
+                    .mutability = .constant,
                     .typ = types.UNTYPED_FLOAT,
                     .value = .{ .literal = .{ .float = value } },
                 };
@@ -1199,6 +1226,7 @@ const Typer = struct {
                 
                 return tast.Expr{
                     .comptime_known = true,
+                    .mutability = .constant,
                     .typ = types.STRING,
                     .value = .{ .literal = .{ .string = value } },
                 };
@@ -1228,6 +1256,7 @@ const Typer = struct {
                 
                 return tast.Expr{
                     .comptime_known = true,
+                    .mutability = .constant,
                     .typ = types.CHAR,
                     .value = .{ .literal = .{ .char = value } },
                 };
@@ -1237,6 +1266,7 @@ const Typer = struct {
             ast.LitKind.False, => {
                 return tast.Expr{
                     .comptime_known = true,
+                    .mutability = .constant,
                     .typ = types.BOOL,
                     .value = .{ .literal = .{ .bool = lit.kind == ast.LitKind.True } },
                 };
@@ -1291,6 +1321,7 @@ const Typer = struct {
         
         return .{
             .typ = typ,
+            .mutability = .constant,
             .value = .{.unary = .{
                 .expr = self.makeExprPointer(expr),
                 .op = op,
@@ -1372,6 +1403,7 @@ const Typer = struct {
                         if (l_is_float) {
                             rhs = tast.Expr{
                                 .typ = lhs.typ,
+                                .mutability = .constant,
                                 .value = .{.cast = .{
                                     .typ = lhs.typ,
                                     .value = self.makeExprPointer(rhs),
@@ -1386,6 +1418,7 @@ const Typer = struct {
                         else if (r_is_float) {
                             lhs = tast.Expr{
                                 .typ = rhs.typ,
+                                .mutability = .constant,
                                 .value = .{.cast = .{
                                     .typ = rhs.typ,
                                     .value = self.makeExprPointer(lhs),
@@ -1406,6 +1439,7 @@ const Typer = struct {
                             if (r_is_float) {
                                 lhs = tast.Expr{
                                     .typ = rhs.typ,
+                                    .mutability = .constant,
                                     .value = .{.cast = .{
                                         .typ = rhs.typ,
                                         .value = self.makeExprPointer(lhs),
@@ -1429,6 +1463,7 @@ const Typer = struct {
                             if (l_is_float) {
                                 rhs = tast.Expr{
                                     .typ = lhs.typ,
+                                    .mutability = .constant,
                                     .value = .{.cast = .{
                                         .typ = lhs.typ,
                                         .value = self.makeExprPointer(rhs),
@@ -1515,6 +1550,7 @@ const Typer = struct {
                     
                     return .{
                         .typ = lhs.typ,
+                        .mutability = .constant,
                         .value = .{ .array_value = .{ .elems = new_elems.items } },
                     };
                 }
@@ -1538,6 +1574,7 @@ const Typer = struct {
                     
                     return .{
                         .typ = lhs.typ,
+                        .mutability = .constant,
                         .value = .{ .array_value = .{ .elems = new_elems.items } },
                     };
                 }
@@ -1552,6 +1589,7 @@ const Typer = struct {
                     if (lhs.comptime_known and rhs.comptime_known) {
                         return .{
                             .comptime_known = true,
+                            .mutability = .constant,
                             .typ = types.STRING,
                             .value = .{.string_concat = .{
                                 .lhs = self.makeExprPointer(lhs),
@@ -1611,6 +1649,7 @@ const Typer = struct {
         
         return .{
             .typ = typ,
+            .mutability = .constant,
             .value = .{.binary = .{
                 .lhs = self.makeExprPointer(lhs),
                 .rhs = self.makeExprPointer(rhs),
@@ -1676,6 +1715,7 @@ const Typer = struct {
         
         return .{
             .typ = typ,
+            .mutability = .constant,
             .value = .{ .array_value = .{ .elems = elems.items } },
         };
     }
@@ -1696,8 +1736,11 @@ const Typer = struct {
             );
         }
         
+        const mutability: Mutability = if (callee.mutability == .constant) .constant else .mutable;
+        
         return .{
             .typ = callee.typ.value.array.child,
+            .mutability = mutability,
             .value = .{.array_index = .{
                 .callee = callee,
                 .index = index,
@@ -1727,6 +1770,7 @@ const Typer = struct {
         
         return .{
             .typ = types.RANGE,
+            .mutability = .constant,
             .value = .{ .range = .{
                 .lhs = lhs,
                 .rhs = rhs,
@@ -1801,12 +1845,14 @@ const Typer = struct {
                 callee_: *tast.Expr,
                 member_text_: []const u8,
                 should_allocate: bool,
+                is_reference_: bool,
             ) ?tast.Expr {
                 const struct_typ = callee_typ_.value.@"struct";
                 
                 if (struct_typ.field_map.get(member_text_)) |index| {
                     return .{
                         .typ = struct_typ.fields[index].typ,
+                        .mutability = if (is_reference_) .mutable else if (callee_.mutability == .constant) .constant else .mutable,
                         .value = .{.struct_member = .{
                             .callee = allocateCallee(typer, callee_, should_allocate),
                             .member_index = index,
@@ -1830,6 +1876,7 @@ const Typer = struct {
                                     }
                                 },
                                 .typ = reference_typ,
+                                .mutability = .constant,
                             });
                         }
                     }
@@ -1843,6 +1890,7 @@ const Typer = struct {
                                     }
                                 },
                                 .typ = callee_.typ.value.reference.child,
+                                .mutability = .constant,
                             });
                         }
                     }
@@ -1854,6 +1902,7 @@ const Typer = struct {
                             .method_index = index,
                             .struct_typ = callee_typ_,
                         }},
+                        .mutability = .constant,
                     };
                 }
                 
@@ -1861,13 +1910,15 @@ const Typer = struct {
                     if (field.is_using and field.typ.value == .@"struct") {
                         var member_callee: tast.Expr = .{
                             .typ = field.typ,
+                            .mutability = callee_.mutability,
+                            .comptime_known = callee_.comptime_known,
                             .value = .{.struct_member = .{
                                 .callee = allocateCallee(typer, callee_, should_allocate),
                                 .member_index = i,
                             }},
                         };
                         
-                        if (typeStructMemberInner(typer, field.typ, &member_callee, member_text_, true)) |expr| {
+                        if (typeStructMemberInner(typer, field.typ, &member_callee, member_text_, true, is_reference_)) |expr| {
                             return expr;
                         }
                     }
@@ -1877,7 +1928,7 @@ const Typer = struct {
             }
         };
         
-        if (Inner.typeStructMemberInner(self, callee_typ, callee, member_text, false)) |expr| {
+        if (Inner.typeStructMemberInner(self, callee_typ, callee, member_text, false, is_reference)) |expr| {
             return expr;
         }
         
@@ -1903,6 +1954,8 @@ const Typer = struct {
             if (symbol) |sym| {
                 return .{
                     .typ = sym.typ,
+                    .mutability = sym.mutability,
+                    .comptime_known = sym.comptime_known,
                     .value = .{.identifier = .{ .name = sym.symbol }},
                 };
             }
@@ -1925,6 +1978,7 @@ const Typer = struct {
             // self.reporter.reportErrorAtSpan(span, "Unknown enum value", .{});
             return .{
                 .typ = types.UNKNOWN_ENUM,
+                .mutability = .constant,
                 .value = .invalid,
             };
         }
@@ -1941,6 +1995,7 @@ const Typer = struct {
             if (std.mem.eql(u8, member_text, item.text)) {
                 return .{
                     .typ = enum_typ,
+                    .mutability = .constant,
                     .value = .{.enum_value = .{ .item_index = i }},
                 };
             }
@@ -1955,6 +2010,8 @@ const Typer = struct {
             if (symbol) |sym| {
                 return .{
                     .typ = sym.typ,
+                    .comptime_known = sym.comptime_known,
+                    .mutability = sym.mutability,
                     .value = .{.identifier = .{ .name = sym.symbol }},
                 };
             }
@@ -1993,6 +2050,7 @@ const Typer = struct {
                                 }
                             },
                             .typ = reference_typ,
+                            .mutability = .constant,
                         });
                     }
                 }
@@ -2006,12 +2064,14 @@ const Typer = struct {
                                 }
                             },
                             .typ = callee.typ.value.reference.child,
+                            .mutability = .constant,
                         });
                     }
                 }
                 
                 return .{
                     .typ = method.typ,
+                    .mutability = .constant,
                     .value = .{.enum_method = .{
                         .callee = actual_callee,
                         .method_index = i,
@@ -2043,6 +2103,7 @@ const Typer = struct {
             
             return .{
                 .typ = types.UNTYPED_INT,
+                .mutability = .constant,
                 .value = .{.builtin = .{ .array_len = .{ .arr = ar } }}
             };
         }
@@ -2053,6 +2114,7 @@ const Typer = struct {
                 
                 return .{
                     .typ = self.type_manager.createFn(param_types, types.VOID, false, true),
+                    .mutability = .constant,
                     .value = .{ .builtin = .{ .dynarray_append = .{ .arr = ar } } }
                 };
             }
@@ -2213,6 +2275,7 @@ const Typer = struct {
         
         return .{
             .typ = typ,
+            .mutability = .constant,
             .value = .{ .struct_value = .{ .values = values } },
         };
     }
@@ -2223,6 +2286,7 @@ const Typer = struct {
         
         return .{
             .typ = self.type_manager.createReference(value.typ),
+            .mutability = .constant,
             .value = .{.referenc_of = .{
                 .typ = value.typ,
                 .value = self.makeExprPointer(value),
@@ -2247,6 +2311,7 @@ const Typer = struct {
         
         return .{
             .typ = typ,
+            .mutability = .constant,
             .value = .{.cast = .{
                 .value = self.makeExprPointer(expr),
                 .typ = typ,
@@ -2342,6 +2407,7 @@ const Typer = struct {
         
         return self.makeExprPointer(.{
             .typ = into,
+            .mutability = .constant,
             .value = .{.cast = .{
                 .typ = expr.typ,
                 .value = expr,

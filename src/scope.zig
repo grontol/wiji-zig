@@ -1,6 +1,7 @@
 const std = @import("std");
 const Symbol = @import("symbol.zig").Symbol;
 const TypedSymbol = @import("symbol.zig").TypedSymbol;
+const Mutability = @import("symbol.zig").Mutability;
 const Type = @import("type.zig").Type;
 
 pub const ScopeMode = enum {
@@ -71,12 +72,13 @@ pub const Scope = struct {
         return null;
     }
     
-    pub fn set(self: *Scope, key: []const u8, symbol: Symbol, typ: *const Type, comptime_known: bool) void {
+    pub fn set(self: *Scope, key: []const u8, symbol: Symbol, typ: *const Type, comptime_known: bool, mutability: Mutability) void {
         const typed_symbol = TypedSymbol{
             .symbol = symbol,
             .typ = typ,
-            .comptime_known = comptime_known,
             .child_symbols = null,
+            .comptime_known = comptime_known,
+            .mutability = mutability,
         };
         
         self.syms.put(key, typed_symbol) catch unreachable;

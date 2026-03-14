@@ -10,11 +10,18 @@ pub const Symbol = struct {
     token: Token,
 };
 
+pub const Mutability = enum {
+    constant,
+    immutable,
+    mutable,
+};
+
 pub const TypedSymbol = struct {
     symbol: Symbol,
     typ: *const Type,
-    comptime_known: bool,
     child_symbols: ?*std.StringHashMap(TypedSymbol),
+    comptime_known: bool,
+    mutability: Mutability,
 };
 
 pub const SymbolManager = struct {
