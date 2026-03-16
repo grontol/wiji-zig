@@ -439,17 +439,35 @@ pub const Printer = struct {
     
     pub fn printModule(self: *Printer, module: *const Module) void {
         self.blockBegin("Module");
-        self.memberBegin("fn_decls");
-        self.arrayBegin();
         
-        for (module.fn_decls) |fn_decl| {
-            self.indentCurrent();
-            self.printFnDecl(&fn_decl);
-            self.commaNl();
+        if (module.var_decls.len > 0) {
+            self.memberBegin("var_decls");
+            self.arrayBegin();
+            
+            for (module.var_decls) |var_decl| {
+                self.indentCurrent();
+                self.printVarDecl(&var_decl);
+                self.commaNl();
+            }
+            
+            self.arrayEnd();
+            self.memberEnd();
         }
         
-        self.arrayEnd();
-        self.memberEnd();
+        if (module.fn_decls.len > 0) {
+            self.memberBegin("fn_decls");
+            self.arrayBegin();
+            
+            for (module.fn_decls) |fn_decl| {
+                self.indentCurrent();
+                self.printFnDecl(&fn_decl);
+                self.commaNl();
+            }
+            
+            self.arrayEnd();
+            self.memberEnd();
+        }
+        
         self.blockEnd();
         self.nl();
         

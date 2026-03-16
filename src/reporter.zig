@@ -101,7 +101,7 @@ fn printSource(writer: *std.io.Writer, src: []const u8, line: usize, start: usiz
     var new_line_before_count: usize = 0;
     
     {
-        var i: i32 = @intCast(start - 1);
+        var i: i32 = if (start > 0) @intCast(start - 1) else 0;
         
         while (i >= 0) : (i -= 1) {
             if (i == 0 or src[@intCast(i)] == '\n') {

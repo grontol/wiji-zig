@@ -84,6 +84,17 @@ pub const Scope = struct {
         self.syms.put(key, typed_symbol) catch unreachable;
     }
     
+    pub fn setType(self: *Scope, key: []const u8, typ: *const Type) void {
+        const symbol = self.syms.getPtr(key);
+        
+        if (symbol) |sym| {
+            sym.typ = typ;
+        }
+        else {
+            std.debug.panic("Scope doesn't have symbol `{s}`", .{key});
+        }
+    }
+    
     pub fn setChildSymbols(self: *Scope, key: []const u8, child_symbols: *std.StringHashMap(TypedSymbol)) void {
         const symbol = self.syms.getPtr(key);
         

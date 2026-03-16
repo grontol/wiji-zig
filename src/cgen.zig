@@ -303,6 +303,8 @@ const Cgen = struct {
     
     fn genVarDecl(self: *Cgen, decl: *const tast.VarDecl, is_top_level: bool) void {
         if (is_top_level and decl.kind == .Const) {
+            std.debug.assert(decl.value != null);
+            
             self.write("#define ");
             self.writeSymbol(decl.name);
             self.write(" ");

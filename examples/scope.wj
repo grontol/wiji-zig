@@ -1,0 +1,7 @@
+struct Foo {}
+
+fn some(foo: Foo, bar: Bar) {
+    
+}
+
+struct Bar {}

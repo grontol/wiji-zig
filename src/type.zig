@@ -572,7 +572,7 @@ pub const TypeManager = struct {
         }
     }
     
-    pub fn createFn(self: *TypeManager, params: []const *const Type, return_typ: *const Type, is_variadic: bool, is_builtin: bool) *const Type {
+    pub fn createFn(self: *TypeManager, params: []const *const Type, return_typ: *const Type, is_variadic: bool, is_builtin: bool) *Type {
         var h = combineHash(@intFromEnum(TypeKind.func), params.len);
         for (params) |param| { h = combineHash(h, param.hash); }
         h = combineHash(h, if (is_variadic) 1 else 0);

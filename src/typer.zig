@@ -47,7 +47,22 @@ fn doesStmtHasReturn(stmt: *const tast.Stmt) bool {
     return false;
 }
 
+const VarDeclData = struct {
+    typ: *const Type,
+    tast: tast.VarDecl,
+    ast: *const ast.VarDecl,
+    span: TokenSpan,
+    scope: *Scope,
+    symbol_id: usize,
+    state: enum {
+        unresolved,
+        resolving,
+        resolved,
+    } = .unresolved,
+};
+
 const FnDeclData = struct {
+    typ: *Type,
     tast: tast.FnDecl,
     ast: *const ast.FnDecl,
     span: TokenSpan,
@@ -75,8 +90,10 @@ const Typer = struct {
     symbol_manager: *SymbolManager,
     children: *const std.StringHashMap(*tast.Module),
     
-    var_decls: std.ArrayList(tast.VarDecl) = .empty,
-    fn_decls: std.ArrayList(FnDeclData) = .empty,
+    var_decl_datas: std.ArrayList(VarDeclData) = .empty,
+    fn_decl_datas: std.ArrayList(FnDeclData) = .empty,
+    struct_decl_datas: std.ArrayList(StructDeclData) = .empty,
+    enum_decl_datas: std.ArrayList(EnumDeclData) = .empty,
     
     cur_fn: ?*tast.FnDecl = null,
     cur_breakable: ?*tast.Stmt = null,
@@ -104,21 +121,9 @@ const Typer = struct {
     
     fn typeModule(self: *Typer, scope: *Scope, module: *const ast.Module, module_id: usize, module_name: []const u8) tast.Module {
         self.symbol_manager.pushNamespace(module_name);
-        const stmts = self.typeStmts(scope, module.exprs);
+        self.typeDeclStmts(scope, module.exprs);
+        _ = self.typeStmts(scope, module.exprs);
         self.symbol_manager.popNamespace();
-        
-        for (stmts) |stmt| {
-            switch (stmt) {
-                .noop => {},
-                .var_decl => |var_decl| { self.var_decls.append(self.arena, var_decl) catch unreachable; },
-                else => {
-                    std.debug.panic("UNREACHABLE: {s}", .{@tagName(stmt)});
-                    
-                    // Already checked at typeStmts
-                    unreachable;
-                }
-            }
-        }
         
         var public_symbols = std.StringHashMap(TypedSymbol).init(self.arena);
         var iter = scope.syms.iterator();
@@ -134,9 +139,38 @@ const Typer = struct {
             children.appendAssumeCapacity(entry.value_ptr.*);
         }
         
-        var fn_decls = self.arena.alloc(tast.FnDecl, self.fn_decls.items.len) catch unreachable;
+        for (self.struct_decl_datas.items) |struct_decl_data| {
+            self.typeStructDeclFields(struct_decl_data.scope, struct_decl_data.ast, struct_decl_data.typ);
+        }
         
-        for (self.fn_decls.items, 0..) |*decl, i| {
+        for (self.struct_decl_datas.items) |struct_decl_data| {
+            struct_decl_data.typ.value.@"struct".calculate(self.reporter);
+        }
+        
+        for (self.struct_decl_datas.items) |struct_decl_data| {
+            self.typeStructDeclMember(struct_decl_data.scope, struct_decl_data.ast, struct_decl_data.typ);
+        }
+        
+        for (self.enum_decl_datas.items) |enum_decl_data| {
+            self.typeEnumDeclMember(enum_decl_data.scope, enum_decl_data.ast, enum_decl_data.typ);
+        }
+        
+        var var_decls = std.ArrayList(tast.VarDecl).empty;
+        var fn_decls = self.arena.alloc(tast.FnDecl, self.fn_decl_datas.items.len) catch unreachable;
+        
+        var var_decl_symbol_map = std.AutoHashMap(usize, usize).init(self.temp_allocator);
+        defer var_decl_symbol_map.deinit();
+        
+        for (self.var_decl_datas.items, 0..) |*decl, i| {
+            var_decl_symbol_map.put(decl.symbol_id, i) catch unreachable;
+        }
+        
+        for (self.var_decl_datas.items) |*decl| {
+            if (decl.state != .unresolved) continue;
+            self.resolveVarDecl(decl, &var_decl_symbol_map, &var_decls);
+        }
+        
+        for (self.fn_decl_datas.items, 0..) |*decl, i| {
             if (decl.ast.body != null) {
                 self.typeFnDeclBody(decl.scope, decl.ast, &decl.tast);
             }
@@ -144,50 +178,31 @@ const Typer = struct {
             fn_decls[i] = decl.tast;
         }
         
-        self.fn_decls.clearAndFree(self.temp_allocator);
+        self.var_decl_datas.clearAndFree(self.temp_allocator);
+        self.fn_decl_datas.clearAndFree(self.temp_allocator);
+        self.struct_decl_datas.clearAndFree(self.temp_allocator);
+        self.enum_decl_datas.clearAndFree(self.temp_allocator);
         
         return .{
             .id = module_id,
-            .var_decls = self.var_decls.items,
+            .var_decls = self.collectAndFreeTempList(tast.VarDecl, &var_decls),
             .fn_decls = fn_decls,
             .public_symbols = public_symbols,
             .children = children.items,
         };
     }
     
-    fn typeStmts(self: *Typer, scope: *Scope, exprs: []const ast.Expr) []const tast.Stmt {
-        var stmts = std.ArrayList(tast.Stmt).empty;
-        
-        var fn_decl_datas = std.ArrayList(FnDeclData).empty;
-        defer fn_decl_datas.clearAndFree(self.temp_allocator);
-        
-        var struct_decl_datas = std.ArrayList(StructDeclData).empty;
-        defer struct_decl_datas.clearAndFree(self.temp_allocator);
-        
-        var enum_decl_datas = std.ArrayList(EnumDeclData).empty;
-        defer enum_decl_datas.clearAndFree(self.temp_allocator);
-        
+    fn typeDeclStmts(self: *Typer, scope: *Scope, exprs: []const ast.Expr) void {
         for (exprs, 0..) |expr, i| {
             switch (expr.value) {
-                ast.Kind.import => |imp| {
-                    self.typeImport(scope, &imp);
-                },
-                ast.Kind.fn_decl => |fn_decl| {
-                    fn_decl_datas.append(self.temp_allocator, .{
-                        .tast = self.typeFnDeclForward(scope, &fn_decl, null),
-                        .ast = &exprs[i].value.fn_decl,
-                        .span = expr.span,
-                        .scope = scope,
-                    }) catch unreachable;
-                },
                 ast.Kind.struct_decl => {
-                    struct_decl_datas.append(
+                    self.struct_decl_datas.append(
                         self.temp_allocator,
                         self.typeStructDeclForward(scope, &exprs[i].value.struct_decl),
                     ) catch unreachable;
                 },
                 ast.Kind.enum_decl => {
-                    enum_decl_datas.append(
+                    self.enum_decl_datas.append(
                         self.temp_allocator,
                         self.typeEnumDecl(scope, &exprs[i].value.enum_decl),
                     ) catch unreachable;
@@ -196,62 +211,62 @@ const Typer = struct {
             }
         }
         
-        for (struct_decl_datas.items) |struct_decl_data| {
-            self.typeStructDeclFields(struct_decl_data.scope, struct_decl_data.ast, struct_decl_data.typ);
+        for (exprs, 0..) |expr, i| {
+            switch (expr.value) {
+                ast.Kind.import,
+                ast.Kind.struct_decl,
+                ast.Kind.enum_decl => {},
+                ast.Kind.var_decl => {
+                    if (scope.mode == .module or scope.mode == .container) {
+                        self.var_decl_datas.append(
+                            self.temp_allocator,
+                            self.typeVarDeclForward(scope, &exprs[i].value.var_decl, expr.span),
+                        ) catch unreachable;
+                    }
+                },
+                ast.Kind.fn_decl => {
+                    const ast_fn_decl = &exprs[i].value.fn_decl;
+                    const fn_decl_data = self.typeFnDeclForward(scope, ast_fn_decl, expr.span);
+                    
+                    self.fn_decl_datas.append(
+                        self.temp_allocator,
+                        fn_decl_data,
+                    ) catch unreachable;
+                    
+                    if (ast_fn_decl.body) |body| {
+                        self.typeDeclStmts(fn_decl_data.scope, body.exprs);
+                    }
+                },
+                else => {}
+            }
         }
+    }
+    
+    fn typeStmts(self: *Typer, scope: *Scope, exprs: []const ast.Expr) []const tast.Stmt {
+        var stmts = std.ArrayList(tast.Stmt).empty;
         
         for (exprs) |expr| {
             switch (expr.value) {
-                ast.Kind.import,
                 ast.Kind.fn_decl,
                 ast.Kind.struct_decl,
                 ast.Kind.enum_decl => {},
+                ast.Kind.var_decl => |var_decl| {
+                    if (scope.mode == .local) {
+                        stmts.append(self.temp_allocator, self.typeVarDecl(scope, &var_decl, expr.span)) catch unreachable;
+                    }
+                },
+                ast.Kind.import => |imp| {
+                    self.typeImport(scope, &imp);
+                },
                 else => {
-                    const stmt = self.typeStmt(scope, &expr, false);
-                    
-                    switch (expr.value) {
-                        ast.Kind.var_decl => {},
-                        ast.Kind.import => {},
-                        
-                        else => {
-                            if (scope.mode == .module) {
-                                self.reporter.reportErrorAtSpan(expr.span, "This kind of statement cannot be placed at top level", .{});
-                            }
-                        },
+                    if (scope.mode == .module or scope.mode == .container) {
+                        self.reporter.reportErrorAtSpan(expr.span, "This kind of statement cannot be placed inside a function", .{});
                     }
                     
-                    stmts.append(self.temp_allocator, stmt) catch unreachable;
+                    stmts.append(self.temp_allocator, self.typeStmt(scope, &expr, false)) catch unreachable;
                 }
             }
         }
-        
-        for (struct_decl_datas.items) |struct_decl_data| {
-            self.typeStructDeclMember(struct_decl_data.scope, struct_decl_data.ast, struct_decl_data.typ);
-        }
-        
-        for (enum_decl_datas.items) |enum_decl_data| {
-            self.typeEnumDeclMember(enum_decl_data.scope, enum_decl_data.ast, enum_decl_data.typ);
-        }
-        
-        // Calculate structs size & alignment
-        for (struct_decl_datas.items) |struct_decl_data| {
-            struct_decl_data.typ.value.@"struct".calculate(self.reporter);
-        }
-        
-        for (fn_decl_datas.items) |*fn_decl_data| {
-            if (fn_decl_data.ast.body) |_| {
-                if (fn_decl_data.tast.is_extern) {
-                    self.reporter.reportErrorAtSpan(fn_decl_data.span, "extern function cannot have a body", .{});
-                }
-            }
-            else {
-                if (!fn_decl_data.tast.is_extern) {
-                    self.reporter.reportErrorAtSpan(fn_decl_data.span, "Non extern function must have a body", .{});
-                }
-            }
-        }
-        
-        self.fn_decls.appendSlice(self.temp_allocator, fn_decl_datas.items) catch unreachable;
         
         return self.collectAndFreeTempList(tast.Stmt, &stmts);
     }
@@ -280,7 +295,7 @@ const Typer = struct {
         }
     }
     
-    fn typeFnDeclForward(self: *Typer, scope: *Scope, fn_decl: *const ast.FnDecl, out_typ: ?**const Type) tast.FnDecl {
+    fn typeFnDeclForward(self: *Typer, scope: *Scope, fn_decl: *const ast.FnDecl, span: TokenSpan) FnDeclData {
         const fn_name = self.getTokenText(fn_decl.name);
         
         if (scope.hasSelf(fn_name)) {
@@ -367,12 +382,9 @@ const Typer = struct {
         );
         
         scope.set(fn_name, fn_name_symbol, fn_typ, true, .constant);
+        const new_scope = scope.inheritWithMode(.local, scope.allocator);
         
-        if (out_typ) |typ| {
-            typ.* = fn_typ;
-        }
-        
-        return .{
+        const tast_fn_decl: tast.FnDecl = .{
             .is_extern = fn_decl.is_extern,
             .extern_name = fn_decl.extern_name,
             .extern_abi = fn_decl.extern_abi,
@@ -382,20 +394,26 @@ const Typer = struct {
             .params = params.items,
             .body = null,
         };
+        
+        return .{
+            .typ = fn_typ,
+            .tast = tast_fn_decl,
+            .ast = fn_decl,
+            .scope = new_scope,
+            .span = span,
+        };
     }
     
     fn typeFnDeclBody(self: *Typer, scope: *Scope, fn_decl_ast: *const ast.FnDecl, forward_decl: *tast.FnDecl) void {        
-        var new_scope = scope.inheritWithMode(.local, scope.allocator);
-        
         for (forward_decl.params) |param| {
-            new_scope.set(param.name.text, param.name, param.typ, false, .constant);
+            scope.set(param.name.text, param.name, param.typ, false, .constant);
         }
         
         const parent_fn = self.cur_fn;
         self.cur_fn = forward_decl;
         
         std.debug.assert(fn_decl_ast.body != null);
-        forward_decl.body = self.typeBlock(new_scope, &fn_decl_ast.body.?, true);
+        forward_decl.body = self.typeBlock(scope, &fn_decl_ast.body.?, true);
         
         if (forward_decl.return_typ.kind != types.TypeKind.void) {
             if (!doesAllPathHasReturn(&forward_decl.body.?)) {
@@ -556,49 +574,38 @@ const Typer = struct {
         
         var methods = std.ArrayList(types.TypeMethod).empty;
         
-        var fn_decl_datas = std.ArrayList(FnDeclData).empty;
-        defer fn_decl_datas.clearAndFree(self.temp_allocator);
+        // var struct_decl_datas = std.ArrayList(StructDeclData).empty;
+        // defer struct_decl_datas.clearAndFree(self.temp_allocator);
         
-        var struct_decl_datas = std.ArrayList(StructDeclData).empty;
-        defer struct_decl_datas.clearAndFree(self.temp_allocator);
-        
-        var enum_decl_datas = std.ArrayList(EnumDeclData).empty;
-        defer enum_decl_datas.clearAndFree(self.temp_allocator);
+        // var enum_decl_datas = std.ArrayList(EnumDeclData).empty;
+        // defer enum_decl_datas.clearAndFree(self.temp_allocator);
         
         for (decl.members, 0..) |mem, i| {
             switch (mem.value) {
-                .var_decl => |var_decl| {
-                    const tast_var_decl = self.typeVarDecl(scope, &var_decl, mem.span);
-                    std.debug.assert(tast_var_decl == .var_decl);
-                    
-                    self.var_decls.append(self.arena, tast_var_decl.var_decl) catch unreachable;
+                .var_decl => {
+                    const tast_var_decl = self.typeVarDeclForward(scope, &decl.members[i].value.var_decl, mem.span);
+                    self.var_decl_datas.append(self.temp_allocator, tast_var_decl) catch unreachable;
                 },
-                .fn_decl => |fn_decl| {
-                    var fn_typ: *const Type = undefined;
-                    const tast_fn_decl = self.typeFnDeclForward(scope, &fn_decl, &fn_typ);
+                .fn_decl => {
+                    const fn_decl_data = self.typeFnDeclForward(scope, &decl.members[i].value.fn_decl, decl.members[i].span);
                     
-                    if (fn_typ.value.func.params.len > 0 and fn_typ.value.func.params[0].isSameOrSameReference(struct_typ)) {
+                    if (fn_decl_data.typ.value.func.params.len > 0 and fn_decl_data.typ.value.func.params[0].isSameOrSameReference(struct_typ)) {
                         methods.append(self.temp_allocator, .{
-                            .name = tast_fn_decl.name,
-                            .typ = fn_typ,
+                            .name = fn_decl_data.tast.name,
+                            .typ = fn_decl_data.typ,
                         }) catch unreachable;
                     }
                     
-                    fn_decl_datas.append(self.temp_allocator, .{
-                        .tast = tast_fn_decl,
-                        .ast = &decl.members[i].value.fn_decl,
-                        .span = mem.span,
-                        .scope = scope,
-                    }) catch unreachable;
+                    self.fn_decl_datas.append(self.temp_allocator, fn_decl_data) catch unreachable;
                 },
                 .struct_decl => {
-                    struct_decl_datas.append(
+                    self.struct_decl_datas.append(
                         self.temp_allocator,
                         self.typeStructDeclForward(scope, &decl.members[i].value.struct_decl),
                     ) catch unreachable;
                 },
                 .enum_decl => {
-                    enum_decl_datas.append(
+                    self.enum_decl_datas.append(
                         self.temp_allocator,
                         self.typeEnumDecl(scope, &decl.members[i].value.enum_decl),
                     ) catch unreachable;
@@ -610,31 +617,7 @@ const Typer = struct {
             }
         }
         
-        for (struct_decl_datas.items) |struct_decl_data| {
-            self.typeStructDeclFields(struct_decl_data.scope, struct_decl_data.ast, struct_decl_data.typ);
-        }
-        
-        for (struct_decl_datas.items) |struct_decl_data| {
-            self.typeStructDeclMember(struct_decl_data.scope, struct_decl_data.ast, struct_decl_data.typ);
-        }
-        
-        for (enum_decl_datas.items) |enum_decl_data| {
-            self.typeEnumDeclMember(enum_decl_data.scope, enum_decl_data.ast, enum_decl_data.typ);
-        }
-        
-        // Calculate structs size & alignment
-        for (struct_decl_datas.items) |struct_decl_data| {
-            struct_decl_data.typ.value.@"struct".calculate(self.reporter);
-        }
-        
-        for (fn_decl_datas.items) |*fn_decl_data| {
-            if (fn_decl_data.tast.is_extern) {
-                self.reporter.reportErrorAtSpan(fn_decl_data.span, "extern function must be placed at top level", .{});
-            }
-        }
-        
         struct_typ.value.@"struct".setMethods(self.collectAndFreeTempList(types.TypeMethod, &methods));
-        self.fn_decls.appendSlice(self.temp_allocator, fn_decl_datas.items) catch unreachable;
         scope.parent.?.setChildSymbols(struct_typ.value.@"struct".name.text, scope.makeChildSymbols(self.arena));
         
         self.cur_container_type = cur_container_type;
@@ -677,33 +660,24 @@ const Typer = struct {
         self.cur_container_type = enum_typ;
         
         var methods = std.ArrayList(types.TypeMethod).empty;
-        var fn_decl_datas = std.ArrayList(FnDeclData).empty;
         
         for (decl.members, 0..) |mem, i| {
             switch (mem.value) {
-                .var_decl => |var_decl| {
-                    const tast_var_decl = self.typeVarDecl(scope, &var_decl, mem.span);
-                    std.debug.assert(tast_var_decl == .var_decl);
-                    
-                    self.var_decls.append(self.arena, tast_var_decl.var_decl) catch unreachable;
+                .var_decl => {
+                    const tast_var_decl = self.typeVarDeclForward(scope, &decl.members[i].value.var_decl, mem.span);
+                    self.var_decl_datas.append(self.arena, tast_var_decl) catch unreachable;
                 },
-                .fn_decl => |fn_decl| {
-                    var fn_typ: *const Type = undefined;
-                    const tast_fn_decl = self.typeFnDeclForward(scope, &fn_decl, &fn_typ);
+                .fn_decl => {
+                    const fn_decl_data = self.typeFnDeclForward(scope, &decl.members[i].value.fn_decl, decl.members[i].span);
                     
-                    if (fn_typ.value.func.params.len > 0 and fn_typ.value.func.params[0].isSameOrSameReference(enum_typ)) {
+                    if (fn_decl_data.typ.value.func.params.len > 0 and fn_decl_data.typ.value.func.params[0].isSameOrSameReference(enum_typ)) {
                         methods.append(self.temp_allocator, .{
-                            .name = tast_fn_decl.name,
-                            .typ = fn_typ,
+                            .name = fn_decl_data.tast.name,
+                            .typ = fn_decl_data.typ,
                         }) catch unreachable;
                     }
                     
-                    fn_decl_datas.append(self.temp_allocator, .{
-                        .tast = tast_fn_decl,
-                        .ast = &decl.members[i].value.fn_decl,
-                        .span = mem.span,
-                        .scope = scope,
-                    }) catch unreachable;
+                    self.fn_decl_datas.append(self.temp_allocator, fn_decl_data) catch unreachable;
                 },
                 
                 else => {
@@ -713,11 +687,173 @@ const Typer = struct {
         }
         
         enum_typ.value.@"enum".methods = self.collectAndFreeTempList(types.TypeMethod, &methods);        
-        self.fn_decls.appendSlice(self.temp_allocator, self.collectAndFreeTempList(FnDeclData, &fn_decl_datas)) catch unreachable;
         scope.parent.?.setChildSymbols(enum_typ.value.@"enum".name.text, scope.makeChildSymbols(self.arena));
         
         self.cur_container_type = cur_container_type;
         self.symbol_manager.popNamespace();
+    }
+    
+    fn typeVarDeclForward(self: *Typer, scope: *Scope, var_decl: *const ast.VarDecl, span: TokenSpan) VarDeclData {
+        const name = self.getTokenText(var_decl.name);
+        var typ = types.UNKNOWN;
+        const value: ?*tast.Expr = null;
+        
+        if (scope.hasSelf(name)) {
+            self.reporter.reportErrorAtToken(var_decl.name, "Identifier `{s}` is already defined", .{name});
+        }
+        
+        if (var_decl.typ) |decl_typ| {
+            typ = self.typeType(scope, &decl_typ);
+        }
+        
+        const comptime_known = false;
+        const mutability: Mutability = switch (var_decl.decl.kind) {
+            .KeywordConst => .constant,
+            .KeywordVal => .immutable,
+            .KeywordVar => .mutable,
+            else => unreachable,
+        };
+        
+        const name_symbol = self.symbol_manager.createSymbol(var_decl.name, scope.mode != .local);
+        scope.set(name, name_symbol, typ, comptime_known, mutability);
+        
+        const kind: tast.VarDeclKind = switch (var_decl.decl.kind) {
+            TokenKind.KeywordVal   => .Val,
+            TokenKind.KeywordVar   => .Var,
+            TokenKind.KeywordConst => .Const,
+            else => unreachable,
+        };
+        
+        const tast_var_decl: tast.VarDecl = .{
+            .kind = kind,
+            .name = name_symbol,
+            .typ = typ,
+            .value = value,
+        };
+        
+        return .{
+            .typ = typ,
+            .tast = tast_var_decl,
+            .ast = var_decl,
+            .span = span,
+            .scope = scope,
+            .symbol_id = name_symbol.id,
+        };
+    }
+    
+    fn typeVarDeclValue(self: *Typer, scope: *Scope, ast_decl: *const ast.VarDecl, tast_decl: *tast.VarDecl) void {
+        if (ast_decl.value) |ast_value| {
+            var value = self.makeExprPointer(self.typeExpr(scope, ast_value, tast_decl.typ));
+            tast_decl.value = value;
+            
+            if (tast_decl.typ.kind == .unknown) {
+                tast_decl.typ = value.typ;
+            }
+            else {
+                if (value.typ.canBeAssignedTo(tast_decl.typ)) {
+                    tast_decl.typ = value.typ.assignTo(tast_decl.typ);
+                    value.typ = tast_decl.typ;
+                }
+                else {
+                    const from = value.typ.getTextLeak(self.arena);
+                    const to = tast_decl.typ.getTextLeak(self.arena);
+                    
+                    self.reporter.reportErrorAtSpan(ast_value.span, "Type `{s}` cannot be assigned to `{s}`", .{from, to});
+                }
+            }
+            
+            scope.setType(tast_decl.name.text, tast_decl.typ);
+        }
+    }
+    
+    fn resolveVarDecl(
+        self: *Typer,
+        var_decl_data: *VarDeclData,
+        symbol_map: *const std.AutoHashMap(usize, usize),
+        var_decls: *std.ArrayList(tast.VarDecl),
+    ) void {
+        if (var_decl_data.state == .resolved) return;
+        
+        if (var_decl_data.state == .resolving) {
+            self.reporter.reportErrorAtSpan(var_decl_data.span, "Cyclic reference detected", .{});
+        }
+        
+        var_decl_data.state = .resolving;
+        
+        var deps = std.ArrayList(usize).empty;
+        defer deps.clearAndFree(self.temp_allocator);
+        
+        if (var_decl_data.ast.value) |value| {
+            self.collectSymbols(var_decl_data.scope, value, &deps, null);
+        }
+        
+        if (deps.items.len > 0) {
+            for (deps.items) |dep| {
+                if (symbol_map.get(dep)) |index| {
+                    self.resolveVarDecl(&self.var_decl_datas.items[index], symbol_map, var_decls);
+                }
+            }
+        }
+        
+        var_decl_data.state = .resolved;
+        self.typeVarDeclValue(var_decl_data.scope, var_decl_data.ast, &var_decl_data.tast);
+        var_decls.append(self.temp_allocator, var_decl_data.tast) catch unreachable;
+    }
+    
+    fn collectSymbols(self: *Typer, scope: *Scope, expr: *const ast.Expr, out: *std.ArrayList(usize), out_type: ?**const Type) void {
+        switch (expr.value) {
+            ast.Kind.literal => {},
+            ast.Kind.identifier => |ident| {
+                const name = self.getTokenText(ident.name);
+                const symbol = scope.get(name);
+                
+                if (symbol) |sym| {
+                    if (sym.typ.kind == .unknown) {
+                        out.append(self.temp_allocator, sym.symbol.id) catch unreachable;
+                    }
+                    
+                    if (out_type) |typ| {
+                        typ.* = sym.typ;
+                    }
+                }
+            },
+            ast.Kind.binary => |bin| {
+                self.collectSymbols(scope, bin.lhs, out, null);
+                self.collectSymbols(scope, bin.rhs, out, null);
+            },
+            ast.Kind.struct_value => {
+                for (expr.value.struct_value.elems) |elem| {
+                    self.collectSymbols(scope, &elem.value, out, null);
+                }
+            },
+            ast.Kind.member_access => {
+                var typ: *const Type = undefined;
+                self.collectSymbols(scope, expr.value.member_access.callee, out, &typ);
+                
+                if (typ.value == .typ and typ.value.typ.child.value == .@"struct") {
+                    const struct_typ = typ.value.typ.child.value.@"struct";
+                    
+                    const struct_symbol = scope.get(struct_typ.name.text);
+                    std.debug.assert(struct_symbol != null and struct_symbol.?.typ.value == .typ and struct_symbol.?.typ.value.typ.child.value == .@"struct");
+                    
+                    const member_text = self.getTokenText(expr.value.member_access.member);
+        
+                    if (struct_symbol.?.child_symbols) |child_symbols| {
+                        const symbol = child_symbols.get(member_text);
+                        
+                        if (symbol) |sym| {
+                            if (sym.typ.kind == .unknown) {
+                                std.debug.print("Ketemu {s} {s}\n", .{sym.symbol.text, sym.typ.getTextLeak(self.arena)});
+                                out.append(self.temp_allocator, sym.symbol.id) catch unreachable;
+                            }
+                        }
+                    }
+                }
+            },
+            else => {
+                std.debug.panic("TODO: collectSymbols {s}", .{@tagName(expr.value)});
+            },
+        }
     }
     
     fn typeVarDecl(self: *Typer, scope: *Scope, var_decl: *const ast.VarDecl, span: TokenSpan) tast.Stmt {

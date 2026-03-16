@@ -867,6 +867,10 @@ const Parser = struct {
             self.reporter.reportErrorAtToken(name_token, "Variable should have a type or value", .{});
         }
         
+        const span: TokenSpan = if (value) |v| TokenSpan.from_token_and_span(pub_token orelse decl_token, v.span)
+        else if (typ) |t| TokenSpan.from_token_and_span(pub_token orelse decl_token, t.span)
+        else TokenSpan.from_tokens(pub_token orelse decl_token, name_token);
+        
         return .{
             .value = .{ .var_decl = .{
                 .is_public = pub_token != null,
@@ -875,7 +879,7 @@ const Parser = struct {
                 .typ = typ,
                 .value = value,
             } },
-            .span = TokenSpan.from_tokens(pub_token orelse decl_token, decl_token),
+            .span = span,
         };
     }
     

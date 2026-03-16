@@ -1,17 +1,22 @@
-import "std.wj"
+var F = Foo.FOOD
+const X = Y + 10
+const Y = 20 + Z// + Foo.FOOD
+const Z = 40
 
 const FOO = Foo.{10}
 
 struct Foo {
-    struct Bar {
-        y: i32
-        z: i32
-    }
+    const FOOD = 30
     
     x: i32
-    bar: Bar
+    
+    fn print(self: @Self) {
+        printf("x = %d\n", self.x)
+    }
 }
 
 fn main() {
-    const f = Foo.{10}
+    printf("X = %d\n", X)
 }
+
+extern fn printf(fmt: string, ...args: any)
