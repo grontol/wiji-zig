@@ -19,7 +19,6 @@ pub const Mutability = enum {
 pub const TypedSymbol = struct {
     symbol: Symbol,
     typ: *const Type,
-    child_symbols: ?*std.StringHashMap(TypedSymbol),
     comptime_known: bool,
     mutability: Mutability,
 };

@@ -574,12 +574,6 @@ const Typer = struct {
         
         var methods = std.ArrayList(types.TypeMethod).empty;
         
-        // var struct_decl_datas = std.ArrayList(StructDeclData).empty;
-        // defer struct_decl_datas.clearAndFree(self.temp_allocator);
-        
-        // var enum_decl_datas = std.ArrayList(EnumDeclData).empty;
-        // defer enum_decl_datas.clearAndFree(self.temp_allocator);
-        
         for (decl.members, 0..) |mem, i| {
             switch (mem.value) {
                 .var_decl => {
@@ -618,7 +612,7 @@ const Typer = struct {
         }
         
         struct_typ.value.@"struct".setMethods(self.collectAndFreeTempList(types.TypeMethod, &methods));
-        scope.parent.?.setChildSymbols(struct_typ.value.@"struct".name.text, scope.makeChildSymbols(self.arena));
+        scope.parent.?.setChildScope(struct_typ.value.@"struct".name.text, scope);
         
         self.cur_container_type = cur_container_type;
         self.symbol_manager.popNamespace();
@@ -665,7 +659,7 @@ const Typer = struct {
             switch (mem.value) {
                 .var_decl => {
                     const tast_var_decl = self.typeVarDeclForward(scope, &decl.members[i].value.var_decl, mem.span);
-                    self.var_decl_datas.append(self.arena, tast_var_decl) catch unreachable;
+                    self.var_decl_datas.append(self.temp_allocator, tast_var_decl) catch unreachable;
                 },
                 .fn_decl => {
                     const fn_decl_data = self.typeFnDeclForward(scope, &decl.members[i].value.fn_decl, decl.members[i].span);
@@ -686,8 +680,8 @@ const Typer = struct {
             }
         }
         
-        enum_typ.value.@"enum".methods = self.collectAndFreeTempList(types.TypeMethod, &methods);        
-        scope.parent.?.setChildSymbols(enum_typ.value.@"enum".name.text, scope.makeChildSymbols(self.arena));
+        enum_typ.value.@"enum".methods = self.collectAndFreeTempList(types.TypeMethod, &methods);    
+        scope.parent.?.setChildScope(enum_typ.value.@"enum".name.text, scope);
         
         self.cur_container_type = cur_container_type;
         self.symbol_manager.popNamespace();
@@ -830,20 +824,25 @@ const Typer = struct {
                 var typ: *const Type = undefined;
                 self.collectSymbols(scope, expr.value.member_access.callee, out, &typ);
                 
-                if (typ.value == .typ and typ.value.typ.child.value == .@"struct") {
-                    const struct_typ = typ.value.typ.child.value.@"struct";
-                    
-                    const struct_symbol = scope.get(struct_typ.name.text);
-                    std.debug.assert(struct_symbol != null and struct_symbol.?.typ.value == .typ and struct_symbol.?.typ.value.typ.child.value == .@"struct");
-                    
-                    const member_text = self.getTokenText(expr.value.member_access.member);
-        
-                    if (struct_symbol.?.child_symbols) |child_symbols| {
-                        const symbol = child_symbols.get(member_text);
+                if (typ.value == .typ) {
+                    if (typ.value.typ.child.value == .@"struct") {
+                        const struct_typ = typ.value.typ.child.value.@"struct";
+                        const member_text = self.getTokenText(expr.value.member_access.member);
+                        const symbol = scope.getChildScopeSymbol(struct_typ.name.text, member_text);
                         
                         if (symbol) |sym| {
                             if (sym.typ.kind == .unknown) {
-                                std.debug.print("Ketemu {s} {s}\n", .{sym.symbol.text, sym.typ.getTextLeak(self.arena)});
+                                out.append(self.temp_allocator, sym.symbol.id) catch unreachable;
+                            }
+                        }
+                    }
+                    else if (typ.value.typ.child.value == .@"enum") {
+                        const enum_typ = typ.value.typ.child.value.@"enum";
+                        const member_text = self.getTokenText(expr.value.member_access.member);
+                        const symbol = scope.getChildScopeSymbol(enum_typ.name.text, member_text);
+                        
+                        if (symbol) |sym| {
+                            if (sym.typ.kind == .unknown) {
                                 out.append(self.temp_allocator, sym.symbol.id) catch unreachable;
                             }
                         }
@@ -2168,22 +2167,16 @@ const Typer = struct {
     }
     
     fn typeStructStaticMember(self: *Typer, scope: *Scope, struct_typ: *const types.TypeStruct, member: Token) tast.Expr {
-        const struct_symbol = scope.get(struct_typ.name.text);
-        std.debug.assert(struct_symbol != null and struct_symbol.?.typ.value == .typ and struct_symbol.?.typ.value.typ.child.value == .@"struct");
-        
         const member_text = self.getTokenText(member);
+        const symbol = scope.getChildScopeSymbol(struct_typ.name.text, member_text);
         
-        if (struct_symbol.?.child_symbols) |child_symbols| {
-            const symbol = child_symbols.get(member_text);
-            
-            if (symbol) |sym| {
-                return .{
-                    .typ = sym.typ,
-                    .mutability = sym.mutability,
-                    .comptime_known = sym.comptime_known,
-                    .value = .{.identifier = .{ .name = sym.symbol }},
-                };
-            }
+        if (symbol) |sym| {
+            return .{
+                .typ = sym.typ,
+                .mutability = sym.mutability,
+                .comptime_known = sym.comptime_known,
+                .value = .{.identifier = .{ .name = sym.symbol }},
+            };
         }
         
         self.reporter.reportErrorAtToken(
@@ -2226,21 +2219,15 @@ const Typer = struct {
             }
         }
         
-        const enum_symbol = scope.get(enum_typ.value.@"enum".name.text);
+        const symbol = scope.getChildScopeSymbol(enum_typ.value.@"enum".name.text, member_text);
         
-        if (enum_symbol) |enum_sym| {
-            if (enum_sym.child_symbols) |child_symbols| {
-                const symbol = child_symbols.get(member_text);
-                
-                if (symbol) |sym| {
-                    return .{
-                        .typ = sym.typ,
-                        .comptime_known = sym.comptime_known,
-                        .mutability = sym.mutability,
-                        .value = .{.identifier = .{ .name = sym.symbol }},
-                    };
-                }
-            }
+        if (symbol) |sym| {
+            return .{
+                .typ = sym.typ,
+                .comptime_known = sym.comptime_known,
+                .mutability = sym.mutability,
+                .value = .{.identifier = .{ .name = sym.symbol }},
+            };
         }
         
         self.reporter.reportErrorAtToken(

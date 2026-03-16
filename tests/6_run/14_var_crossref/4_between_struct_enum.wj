@@ -1,0 +1,23 @@
+struct Foo {
+    const X = Bar.Y
+    const Y = 50 + Z
+    const Z = 40
+}
+
+enum Bar {
+    const X = Foo.Y
+    const Y = 20 + Z
+    const Z = 10
+}
+
+fn main() {
+    printf("Foo.X = %d\n", Foo.X)
+    printf("Bar.X = %d\n", Bar.X)
+}
+
+extern fn printf(fmt: string, ...args: any)
+
+/***
+Foo.X = 30
+Bar.X = 90
+***/

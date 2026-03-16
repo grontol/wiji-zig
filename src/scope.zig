@@ -13,6 +13,7 @@ pub const ScopeMode = enum {
 pub const Scope = struct {
     parent: ?*Scope,
     syms: std.StringHashMap(TypedSymbol),
+    child_scopes: std.StringHashMap(*Scope),
     allocator: std.mem.Allocator,
     mode: ScopeMode,
     
@@ -20,6 +21,7 @@ pub const Scope = struct {
         return .{
             .parent = null,
             .syms = std.StringHashMap(TypedSymbol).init(allocator),
+            .child_scopes = std.StringHashMap(*Scope).init(allocator),
             .allocator = allocator,
             .mode = mode,
         };
@@ -34,6 +36,7 @@ pub const Scope = struct {
         scope.* = .{
             .parent = self,
             .syms = std.StringHashMap(TypedSymbol).init(self.allocator),
+            .child_scopes = std.StringHashMap(*Scope).init(self.allocator),
             .allocator = self.allocator,
             .mode = self.mode,
         };
@@ -46,6 +49,7 @@ pub const Scope = struct {
         scope.* = .{
             .parent = self,
             .syms = std.StringHashMap(TypedSymbol).init(allocator),
+            .child_scopes = std.StringHashMap(*Scope).init(allocator),
             .allocator = allocator,
             .mode = mode,
         };
@@ -76,7 +80,6 @@ pub const Scope = struct {
         const typed_symbol = TypedSymbol{
             .symbol = symbol,
             .typ = typ,
-            .child_symbols = null,
             .comptime_known = comptime_known,
             .mutability = mutability,
         };
@@ -95,25 +98,23 @@ pub const Scope = struct {
         }
     }
     
-    pub fn setChildSymbols(self: *Scope, key: []const u8, child_symbols: *std.StringHashMap(TypedSymbol)) void {
-        const symbol = self.syms.getPtr(key);
+    pub fn setChildScope(self: *Scope, key: []const u8, child_scope: *Scope) void {
+        self.child_scopes.put(key, child_scope) catch unreachable;
+    }
+    
+    pub fn getChildScopeSymbol(self: *Scope, key: []const u8, item_key: []const u8) ?TypedSymbol {
+        if (self.child_scopes.get(key)) |child_scope| {
+            return child_scope.syms.get(item_key);
+        }
         
-        if (symbol) |sym| {
-            sym.child_symbols = child_symbols;
+        if (self.parent) |p| {
+            return p.getChildScopeSymbol(key, item_key);
         }
-        else {
-            std.debug.panic("Scope doesn't have symbol `{s}`", .{key});
-        }
+        
+        return null;
     }
     
     pub fn setTypedSymbol(self: *Scope, key: []const u8, typed_symbol: TypedSymbol) void {
         self.syms.put(key, typed_symbol) catch unreachable;
-    }
-    
-    pub fn makeChildSymbols(self: *Scope, allocator: std.mem.Allocator) *std.StringHashMap(TypedSymbol) {
-        const child_symbol = allocator.create(std.StringHashMap(TypedSymbol)) catch unreachable;
-        child_symbol.* = self.syms.cloneWithAllocator(allocator) catch unreachable;
-        
-        return child_symbol;
     }
 };

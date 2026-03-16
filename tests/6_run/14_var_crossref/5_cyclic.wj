@@ -1,0 +1,7 @@
+const X = Y
+const Y = Z + 10
+const Z = X + 2
+
+/***
+Cyclic reference detected
+***/

@@ -1,22 +1,13 @@
-var F = Foo.FOOD
-const X = Y + 10
-const Y = 20 + Z// + Foo.FOOD
-const Z = 40
+enum Foo {
+    const Z = Bar.Z
+}
 
-const FOO = Foo.{10}
-
-struct Foo {
-    const FOOD = 30
-    
-    x: i32
-    
-    fn print(self: @Self) {
-        printf("x = %d\n", self.x)
-    }
+struct Bar {
+    const Z = Foo.Z
 }
 
 fn main() {
-    printf("X = %d\n", X)
+    printf("Foo.Z = %d\n", Foo.Z)
 }
 
 extern fn printf(fmt: string, ...args: any)

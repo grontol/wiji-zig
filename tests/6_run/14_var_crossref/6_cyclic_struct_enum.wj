@@ -1,0 +1,17 @@
+struct Foo {
+    const Z = Bar.Z
+}
+
+enum Bar {
+    const Z = Foo.Z
+}
+
+fn main() {
+    printf("Foo.Z = %d\n", Foo.Z)
+}
+
+extern fn printf(fmt: string, ...args: any)
+
+/***
+Cyclic reference detected
+***/
