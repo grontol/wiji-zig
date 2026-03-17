@@ -44,6 +44,7 @@ pub const NumericKind = enum(u16) {
 
 pub const TypeKind = enum {
     unknown,
+    type_param,
     unknown_enum,
     void,
     numeric,
@@ -70,6 +71,7 @@ pub const TypeFunc = struct {
     returns: *const Type,
     is_variadic: bool,
     is_builtin: bool,
+    is_generic: bool,
 };
 
 pub const TypeArray = struct {
@@ -176,6 +178,10 @@ pub const Type = struct {
     kind: TypeKind,
     value: union(TypeKind) {
         unknown,
+        type_param: struct {
+            name: Symbol,
+            index: usize,
+        },
         unknown_enum,
         void,
         numeric: NumericKind,
@@ -462,6 +468,10 @@ pub const Type = struct {
                 out.appendSlice(allocator, ")") catch unreachable;
             },
             
+            TypeKind.type_param => {
+                out.print(allocator, "{s}", .{self.value.type_param.name.text}) catch unreachable;
+            },
+            
             else => {
                 std.debug.panic("TODO: Type.getText {s}", .{@tagName(self.value)});
             }
@@ -489,6 +499,7 @@ pub const BOOL          = &Type{ .size = 1,  .alignment = 1, .type_id = 16, .has
 pub const RANGE         = &Type{ .size = 8,  .alignment = 4, .type_id = 17, .hash = 17, .kind = .range,   .value = .range };
 pub const ANY           = &Type{ .size = 8,  .alignment = 8, .type_id = 18, .hash = 18, .kind = .any,     .value = .any };
 pub const UNKNOWN_ENUM  = &Type{ .size = 0,  .alignment = 0, .type_id = 19, .hash = 19, .kind = .unknown_enum, .value = .unknown_enum };
+pub const TYPE_PARAM    = &Type{ .size = 0,  .alignment = 0, .type_id = 20, .hash = 20, .kind = .type_param, .value = .type_param };
 
 pub const TypeManager = struct {
     arena: std.mem.Allocator,
@@ -572,7 +583,14 @@ pub const TypeManager = struct {
         }
     }
     
-    pub fn createFn(self: *TypeManager, params: []const *const Type, return_typ: *const Type, is_variadic: bool, is_builtin: bool) *Type {
+    pub fn createFn(
+        self: *TypeManager,
+        params: []const *const Type,
+        return_typ: *const Type,
+        is_variadic: bool,
+        is_builtin: bool,
+        is_generic: bool,
+    ) *Type {
         var h = combineHash(@intFromEnum(TypeKind.func), params.len);
         for (params) |param| { h = combineHash(h, param.hash); }
         h = combineHash(h, if (is_variadic) 1 else 0);
@@ -589,6 +607,7 @@ pub const TypeManager = struct {
                 .returns = return_typ,
                 .is_variadic = is_variadic,
                 .is_builtin = is_builtin,
+                .is_generic = is_generic,
             }},
         };
         
@@ -681,6 +700,28 @@ pub const TypeManager = struct {
             
             return new_typ_ptr;
         }
+    }
+    
+    pub fn createTypeParam(self: *TypeManager, name: Symbol, index: usize) *const Type {
+        const typ = Type{
+            .kind = .type_param,
+            .size = 0,
+            .alignment = 0,
+            .type_id = self.cur_index,
+            .hash = combineHash(@intFromEnum(TypeKind.type_param), index),
+            .value = .{.type_param = .{
+                .name = name,
+                .index = index,
+            }},
+        };
+        
+        const new_typ_ptr = self.arena.create(Type) catch unreachable;
+        new_typ_ptr.* = typ;
+        self.cur_index += 1;
+        
+        self.type_map.put(typ, new_typ_ptr) catch unreachable;
+        
+        return new_typ_ptr;
     }
 };
 

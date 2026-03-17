@@ -69,6 +69,7 @@ pub const FnDecl = struct {
     
     name: Token,
     params: []const FnParam,
+    type_params: []const Token,
     return_typ: ?Type,
     body: ?Block,
 };

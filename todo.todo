@@ -19,3 +19,4 @@
 BUG:
     ✔ Bug kalau unary + binary `!x && y`, jadinya malah `!(x && y)` @done(26-03-14 22:38)
     ☐ foreach kalau gak reference (for x in xs), variable x jadi constant. Terus `const` kalau di-reference tetep `const`. Soalnya bikin bug
+    ☐ Dynamic array kalau dikasih initializer yang sized jadi error "Expected type `[dyn]i32` but got `[1dyn]int`"

@@ -1,13 +1,10 @@
-enum Foo {
-    const Z = Bar.Z
-}
-
-struct Bar {
-    const Z = Foo.Z
-}
+import "std.wj"
 
 fn main() {
-    printf("Foo.Z = %d\n", Foo.Z)
+    var xs: [dyn]i32 = .[]
+    push(&xs, 3)
 }
 
-extern fn printf(fmt: string, ...args: any)
+fn push<T>(ar: &[dyn]T, value: T) {
+    
+}

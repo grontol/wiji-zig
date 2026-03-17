@@ -481,6 +481,43 @@ const Parser = struct {
         
         const fn_token = self.ts.nextExpect(.KeywordFn);
         const name_token = self.ts.nextExpect(.Identifier);
+        var type_params: std.ArrayList(Token) = .empty;
+        
+        if (self.ts.peek().kind == .Lt) {
+            _ = self.ts.next();
+            
+            if (self.ts.peek().kind == .Gt) {
+                self.reporter.reportErrorAtSpan(
+                    TokenSpan.from_tokens(self.ts.current(), self.ts.next()),
+                    "Expected at least 1 type param",
+                    .{}
+                );
+            }
+            
+            var has_comma = true;
+            
+            while (self.ts.hasNext()) {
+                if (self.ts.peek().kind == .Gt) {
+                    _ = self.ts.next();
+                    break;
+                }
+                
+                if (!has_comma) {
+                    self.reporter.reportErrorAtToken(self.ts.current(), "Expected comma", .{});
+                }
+                
+                type_params.append(self.temp_allocator, self.ts.nextExpect(.Identifier)) catch unreachable;
+                
+                if (self.ts.peek().kind == .Comma) {
+                    _ = self.ts.next();
+                    has_comma = true;
+                }
+                else {
+                    has_comma = false;
+                }
+            }
+        }
+        
         _ = self.ts.nextExpect(.OpenParen);
         
         var params: std.ArrayList(ast.FnParam) = .empty;
@@ -565,6 +602,7 @@ const Parser = struct {
                     .is_public = public_token != null,
                     .name = name_token,
                     .params = self.collectAndFreeTempList(ast.FnParam, &params),
+                    .type_params = self.collectAndFreeTempList(Token, &type_params),
                     .return_typ = return_typ,
                     .body = body,
                 },

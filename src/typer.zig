@@ -308,16 +308,26 @@ const Typer = struct {
         var is_variadic = false;
         var return_typ = types.VOID;
         
+        const new_scope = scope.inheritWithMode(.local, scope.allocator);
+        
+        for (fn_decl.type_params, 0..) |p, i| {
+            const type_param_name = self.getTokenText(p);
+            const type_param_symbol = self.symbol_manager.createSymbol(p, false);
+            const type_param_typ = self.type_manager.createTypeParam(type_param_symbol, i);
+            
+            new_scope.set(type_param_name, type_param_symbol, type_param_typ, true, .constant);
+        }
+        
         for (fn_decl.params) |param| {
             var param_typ = types.UNKNOWN;
             var param_default_value: ?*tast.Expr = null;
             
             if (param.typ) |typ| {
-                param_typ = self.typeType(scope, &typ);
+                param_typ = self.typeType(new_scope, &typ);
                 
                 if (param.default_value) |def_value| {
                     has_default = true;
-                    param_default_value = self.makeExprPointer(self.typeExpr(scope, def_value, param_typ));
+                    param_default_value = self.makeExprPointer(self.typeExpr(new_scope, def_value, param_typ));
                     
                     const default_type = param_default_value.?.typ;
                     
@@ -338,7 +348,7 @@ const Typer = struct {
             }
             else if (param.default_value) |def_value| {
                 has_default = true;
-                param_default_value = self.makeExprPointer(self.typeExpr(scope, def_value, types.UNKNOWN));
+                param_default_value = self.makeExprPointer(self.typeExpr(new_scope, def_value, types.UNKNOWN));
                 param_typ = param_default_value.?.typ.coerceIntoRuntime(self.type_manager);
             }
             else {
@@ -379,10 +389,10 @@ const Typer = struct {
             return_typ,
             is_variadic,
             false,
+            fn_decl.type_params.len > 0,
         );
         
         scope.set(fn_name, fn_name_symbol, fn_typ, true, .constant);
-        const new_scope = scope.inheritWithMode(.local, scope.allocator);
         
         const tast_fn_decl: tast.FnDecl = .{
             .is_extern = fn_decl.is_extern,
@@ -2326,7 +2336,7 @@ const Typer = struct {
                 param_types[0] = ar_typ.child;
                 
                 return .{
-                    .typ = self.type_manager.createFn(param_types, types.VOID, false, true),
+                    .typ = self.type_manager.createFn(param_types, types.VOID, false, true, false),
                     .mutability = .constant,
                     .value = .{ .builtin = .{ .dynarray_append = .{ .arr = ar } } }
                 };
@@ -2557,40 +2567,42 @@ const Typer = struct {
     }
     
     fn typeType(self: *Typer, scope: *Scope, typ: *const ast.Type) *const Type {
-        var result_type: *const Type = undefined;
-        
         switch (typ.value) {
             ast.TypeKind.simple => {
                 const typ_text = self.getTokenText(typ.value.simple.name);
                 
-                if (std.mem.eql(u8, typ_text, "u8"))       { result_type = types.U8; }
-                else if (std.mem.eql(u8, typ_text, "u16")) { result_type = types.U16; }
-                else if (std.mem.eql(u8, typ_text, "u32")) { result_type = types.U32; }
-                else if (std.mem.eql(u8, typ_text, "u64")) { result_type = types.U64; }
-                else if (std.mem.eql(u8, typ_text, "i8"))  { result_type = types.I8; }
-                else if (std.mem.eql(u8, typ_text, "i16")) { result_type = types.I16; }
-                else if (std.mem.eql(u8, typ_text, "i32")) { result_type = types.I32; }
-                else if (std.mem.eql(u8, typ_text, "i64")) { result_type = types.I64; }
-                else if (std.mem.eql(u8, typ_text, "f32")) { result_type = types.F32; }
-                else if (std.mem.eql(u8, typ_text, "f64")) { result_type = types.F64; }
+                if (std.mem.eql(u8, typ_text, "u8"))       { return types.U8; }
+                else if (std.mem.eql(u8, typ_text, "u16")) { return types.U16; }
+                else if (std.mem.eql(u8, typ_text, "u32")) { return types.U32; }
+                else if (std.mem.eql(u8, typ_text, "u64")) { return types.U64; }
+                else if (std.mem.eql(u8, typ_text, "i8"))  { return types.I8; }
+                else if (std.mem.eql(u8, typ_text, "i16")) { return types.I16; }
+                else if (std.mem.eql(u8, typ_text, "i32")) { return types.I32; }
+                else if (std.mem.eql(u8, typ_text, "i64")) { return types.I64; }
+                else if (std.mem.eql(u8, typ_text, "f32")) { return types.F32; }
+                else if (std.mem.eql(u8, typ_text, "f64")) { return types.F64; }
                 
-                else if (std.mem.eql(u8, typ_text, "bool"))   { result_type = types.BOOL; }
-                else if (std.mem.eql(u8, typ_text, "char"))   { result_type = types.CHAR; }
-                else if (std.mem.eql(u8, typ_text, "string")) { result_type = types.STRING; }
-                else if (std.mem.eql(u8, typ_text, "range"))  { result_type = types.RANGE; }
+                else if (std.mem.eql(u8, typ_text, "bool"))   { return types.BOOL; }
+                else if (std.mem.eql(u8, typ_text, "char"))   { return types.CHAR; }
+                else if (std.mem.eql(u8, typ_text, "string")) { return types.STRING; }
+                else if (std.mem.eql(u8, typ_text, "range"))  { return types.RANGE; }
                 
-                else if (std.mem.eql(u8, typ_text, "void"))   { result_type = types.VOID; }
-                else if (std.mem.eql(u8, typ_text, "any"))    { result_type = types.ANY; }
+                else if (std.mem.eql(u8, typ_text, "void"))   { return types.VOID; }
+                else if (std.mem.eql(u8, typ_text, "any"))    { return types.ANY; }
                 
                 else {
-                    const symbol = scope.get(typ_text);
-                    
-                    if (symbol) |sym| {
-                        if (sym.typ.kind != .typ) {
-                            self.reporter.reportErrorAtToken(typ.value.simple.name, "`{s}` is not a type", .{typ_text});
+                    if (scope.get(typ_text)) |sym| {
+                        switch (sym.typ.kind) {
+                            .typ => {
+                                return sym.typ.value.typ.child;
+                            },
+                            .type_param => {
+                                return sym.typ;
+                            },
+                            else => {},
                         }
                         
-                        result_type = sym.typ.value.typ.child;
+                        self.reporter.reportErrorAtToken(typ.value.simple.name, "`{s}` is not a type", .{typ_text});
                     }
                     else {
                         self.reporter.reportErrorAtToken(typ.value.simple.name, "Unknown type `{s}`", .{typ_text});
@@ -2598,14 +2610,14 @@ const Typer = struct {
                 }
             },
             ast.TypeKind.array => {
-                result_type = self.type_manager.createArray(
+                return self.type_manager.createArray(
                     self.typeType(scope, typ.value.array.child),
                     typ.value.array.is_dyn,
                     null
                 );
             },
             ast.TypeKind.reference => {
-                result_type = self.type_manager.createReference(
+                return self.type_manager.createReference(
                     self.typeType(scope, typ.value.reference.child)
                 );
             },
@@ -2616,7 +2628,7 @@ const Typer = struct {
                 self.typeStructDeclFields(struct_decl_data.scope, struct_decl_data.ast, struct_decl_data.typ);
                 self.typeStructDeclMember(struct_decl_data.scope, struct_decl_data.ast, struct_decl_data.typ);
                 
-                result_type = struct_decl_data.typ;
+                return struct_decl_data.typ;
             },
             ast.TypeKind.inline_enum => {
                 const enum_decl = &typ.value.inline_enum;
@@ -2624,7 +2636,7 @@ const Typer = struct {
                 const enum_decl_data = self.typeEnumDecl(scope, enum_decl);
                 self.typeEnumDeclMember(enum_decl_data.scope, enum_decl_data.ast, enum_decl_data.typ);
                 
-                result_type = enum_decl_data.typ;
+                return enum_decl_data.typ;
             },
             ast.TypeKind.self => {
                 if (self.cur_container_type) |container_typ| {
@@ -2639,8 +2651,6 @@ const Typer = struct {
                 std.debug.panic("TODO: typeType {s}", .{@tagName(typ.value)});
             }
         }
-        
-        return result_type;
     }
     
     fn makeStmtPointer(self: *Typer, stmt: tast.Stmt) *tast.Stmt {
