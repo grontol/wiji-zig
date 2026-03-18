@@ -33,7 +33,7 @@ fn main() {
         removeDeads()
         totalTime += getFrameTime()
         
-        if (totalTime > 1.0) {
+        if (totalTime > 0.5) {
             totalTime = 0
             spawnEnemy()
         }
@@ -82,7 +82,7 @@ fn spawnEnemy() {
     const x = rand() % SCREEN_WIDTH
     const y = rand() % SCREEN_HEIGHT / 2
     
-    enemies.append(Enemy.new(x as f32, y as f32))
+    enemies.append(Enemy.new(.green))
 }
 
 fn removeDeads() {
@@ -109,8 +109,6 @@ fn removeDeads() {
             i += 1
         }
     }
-    
-    printf("Bullet len = %d, Enemy len = %d\n", enemies.len)
 }
 
 struct Player {
@@ -128,7 +126,8 @@ struct Player {
         if isKeyDown(KEY_A) {
             self.x -= MOVE_SPEED
         }
-        else if isKeyDown(KEY_D) {
+        
+        if isKeyDown(KEY_D) {
             self.x += MOVE_SPEED
         }
         
@@ -138,22 +137,40 @@ struct Player {
     }
 }
 
+enum EnemyKind {
+    green,
+    yellow,
+    red,
+}
+
 struct Enemy {
     using entity: Entity
+    kind: EnemyKind
     dead = false
-    kind: enum {
-        one,
-        two,
-    }
+    offX = 0.0
+    offY = 0.0
     
-    fn new(x: f32, y: f32): Enemy {
+    fn new(kind: EnemyKind): Enemy {
+        var texture: Texture
+        
+        if      kind == .green  texture = textGreen
+        else if kind == .yellow texture = textYellow
+        else                    texture = textRed
+        
         return .{
-            entity = Entity.new(x, y, textGreen)
+            entity = Entity.new((rand() % SCREEN_WIDTH) as f32, -100, texture),
+            kind = kind,
         }
     }
     
     fn update(self: &Enemy) {
+        if self.kind == .green {
+            self.y += 1
+        }
         
+        if self.y > SCREEN_HEIGHT + 100 {
+            self.dead = true
+        }
     }
 }
 

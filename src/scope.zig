@@ -76,6 +76,17 @@ pub const Scope = struct {
         return null;
     }
     
+    pub fn getPtr(self: *const Scope, key: []const u8) ?*TypedSymbol {
+        const res = self.syms.getPtr(key);
+        if (res) |r| return r;
+        
+        if (self.parent) |p| {
+            return p.getPtr(key);
+        }
+        
+        return null;
+    }    
+    
     pub fn set(self: *Scope, key: []const u8, symbol: Symbol, typ: *const Type, comptime_known: bool, mutability: Mutability) void {
         const typed_symbol = TypedSymbol{
             .symbol = symbol,

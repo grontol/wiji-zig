@@ -195,6 +195,9 @@ const Typer = struct {
     fn typeDeclStmts(self: *Typer, scope: *Scope, exprs: []const ast.Expr) void {
         for (exprs, 0..) |expr, i| {
             switch (expr.value) {
+                ast.Kind.import => |imp| {
+                    self.typeImport(scope, &imp);
+                },
                 ast.Kind.struct_decl => {
                     self.struct_decl_datas.append(
                         self.temp_allocator,
@@ -247,6 +250,7 @@ const Typer = struct {
         
         for (exprs) |expr| {
             switch (expr.value) {
+                ast.Kind.import,
                 ast.Kind.fn_decl,
                 ast.Kind.struct_decl,
                 ast.Kind.enum_decl => {},
@@ -254,9 +258,6 @@ const Typer = struct {
                     if (scope.mode == .local) {
                         stmts.append(self.temp_allocator, self.typeVarDecl(scope, &var_decl, expr.span)) catch unreachable;
                     }
-                },
-                ast.Kind.import => |imp| {
-                    self.typeImport(scope, &imp);
                 },
                 else => {
                     if (scope.mode == .module or scope.mode == .container) {
@@ -766,7 +767,11 @@ const Typer = struct {
                 }
             }
             
-            scope.setType(tast_decl.name.text, tast_decl.typ);
+            const sym = scope.getPtr(tast_decl.name.text);
+            std.debug.assert(sym != null);
+            
+            sym.?.typ = tast_decl.typ;
+            sym.?.comptime_known = ast_decl.decl.kind == .KeywordConst and value.comptime_known;
         }
     }
     
@@ -824,6 +829,11 @@ const Typer = struct {
             ast.Kind.binary => |bin| {
                 self.collectSymbols(scope, bin.lhs, out, null);
                 self.collectSymbols(scope, bin.rhs, out, null);
+            },
+            ast.Kind.array_value => |arr| {
+                for (arr.elems) |elem| {
+                    self.collectSymbols(scope, &elem, out, null);
+                }
             },
             ast.Kind.struct_value => {
                 for (expr.value.struct_value.elems) |elem| {
@@ -1768,9 +1778,15 @@ const Typer = struct {
                 );
             }
         }
-        else if (lhs.value == .array_value) {
+        else if (lhs.typ.kind == .array) {            
             if (bin.op.kind == .MulMul) {
-                if (rhs.value == .literal and rhs.value.literal == .int) {
+                if (!lhs.comptime_known) {
+                    self.reporter.reportErrorAtSpan(bin.lhs.span, "Repeat (**) array operand must be compile time known", .{});
+                }
+                else if (lhs.value != .array_value) {
+                    self.reporter.reportErrorAtSpan(bin.lhs.span, "Repeat (**) array operand must be array literal (right now)", .{});
+                }
+                else if (rhs.value == .literal and rhs.value.literal == .int) {
                     const elems_len = lhs.value.array_value.elems.len;
                     const count = rhs.value.literal.int;
                     
@@ -1784,6 +1800,7 @@ const Typer = struct {
                     
                     return .{
                         .typ = lhs.typ,
+                        .comptime_known = true,
                         .mutability = .constant,
                         .value = .{ .array_value = .{ .elems = new_elems.items } },
                     };
@@ -1793,7 +1810,22 @@ const Typer = struct {
                 }
             }
             else if (bin.op.kind == .PlusPlus) {
-                if (rhs.value == .array_value and rhs.typ.isSame(lhs.typ)) {
+                if (rhs.typ.kind == .array and rhs.typ.isSame(lhs.typ)) {
+                    if (!lhs.comptime_known) {
+                        self.reporter.reportErrorAtSpan(bin.lhs.span, "Concat (++) array operand must be compile time known", .{});
+                    }
+                    else if (!rhs.comptime_known) {
+                        self.reporter.reportErrorAtSpan(bin.rhs.span, "Concat (++) array operand must be compile time known", .{});
+                    }
+                    
+                    if (lhs.value != .array_value) {
+                        self.reporter.reportErrorAtSpan(bin.lhs.span, "Concat (++) array operand must be array literal (right now)", .{});
+                    }
+                    
+                    if (rhs.value != .array_value) {
+                        self.reporter.reportErrorAtSpan(bin.rhs.span, "Concat (++) array operand must be array literal (right now)", .{});
+                    }
+                    
                     const l_elems_len = lhs.value.array_value.elems.len;
                     const r_elems_len = rhs.value.array_value.elems.len;
                     var new_elems = std.ArrayList(tast.Expr).initCapacity(self.arena, l_elems_len + r_elems_len) catch unreachable;
@@ -1808,6 +1840,7 @@ const Typer = struct {
                     
                     return .{
                         .typ = lhs.typ,
+                        .comptime_known = true,
                         .mutability = .constant,
                         .value = .{ .array_value = .{ .elems = new_elems.items } },
                     };
@@ -1949,6 +1982,7 @@ const Typer = struct {
         
         return .{
             .typ = typ,
+            .comptime_known = true,
             .mutability = .constant,
             .value = .{ .array_value = .{ .elems = elems.items } },
         };

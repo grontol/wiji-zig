@@ -520,6 +520,8 @@ pub const TypeManager = struct {
     }
     
     pub fn createArray(self: *TypeManager, child: *const Type, is_dyn: bool, len: ?usize) *const Type {
+        _ = len;
+        
         var h = combineHash(@intFromEnum(TypeKind.array), child.hash);
         h = combineHash(h, if (is_dyn) 1 else 0);
         // h = combineHash(h, if (len != null) 1 else 0);
@@ -527,15 +529,15 @@ pub const TypeManager = struct {
         
         const typ = Type{
             .kind = .array,
-            .size = if (len) |l| @intCast(child.size * l) else 0,
+            .size = 16,//if (len) |l| @intCast(child.size * l) else 0,
             .alignment = child.alignment,
             .type_id = self.cur_index,
             .hash = h,
             .value = .{.array = .{
                 .child = child,
                 .is_dyn = is_dyn,
-                .len = len orelse 0,
-                .sized = len != null,
+                .len = 0,//len orelse 0,
+                .sized = false,//len != null,
             }},
         };
         

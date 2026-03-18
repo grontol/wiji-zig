@@ -10,10 +10,36 @@ fn main() {
     for b in BAR {
         printf("%d\n", b)
     }
+    
+    for b in BAZ {
+        printf("%d\n", b)
+    }
 }
 
 extern fn printf(fmt: string, ...args: any)
 
 /***
-i_am_with_you
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+2
+3
+1
+2
+3
+1
+2
+3
+0
+1
+2
+3
 ***/
