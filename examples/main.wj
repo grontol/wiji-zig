@@ -1,19 +1,62 @@
-const FOO = .[1] ** 10
-const BAR = .[1, 2, 3] ** 3
-const BAZ = .[0, 1] ++ .[2, 3]
-
-fn main() {
-    for f in FOO {
-        printf("%d\n", f)
-    }
+struct Point {
+    x: i32
+    y: i32
     
-    for b in BAR {
-        printf("%d\n", b)
+    fn print(self: Point) {
+        printf("x = %d, y = %d\n", self.x, self.y)
     }
 }
 
-extern fn printf(fmt: string, ...args: any)
+fn main() {
+    val xs: [dyn]i32 = .[]
+    val ys: [dyn]string = .[]
+    val points: [dyn]Point = .[]
+    
+    dynArrayAppend(&xs, 4)
+    dynArrayAppend(&ys, "Satu")
+    dynArrayAppend(&ys, "Dua")
+    dynArrayAppend(&ys, "Tiga")
+    dynArrayAppend(&points, .{10, 20})
+    dynArrayAppend(&points, .{50, 60})
+    
+    for x in xs {
+        printf("%d\n", x)
+    }
+    
+    for y in ys {
+        printf("%s\n", y)
+    }
+    
+    for p in points {
+        p.print()
+    }
+}
 
-/***
-i_am_with_you
-***/
+fn dynArrayAppend<T>(arr: &[dyn]T, value: T) {
+    if arr.len + 1 > arr.cap {
+        var newCap: usize
+        
+        if arr.cap == 0 newCap = 16
+        else newCap = arr.cap * 2
+        
+        var newPtr: voidptr
+        if arr.cap == 0 {
+            newPtr = malloc(newCap * @sizeOf(T))
+            memcpy(arr.ptr, newPtr, arr.len * @sizeOf(T))
+        }
+        else {
+            newPtr = realloc(arr.ptr, newCap * @sizeOf(T))
+        }
+        
+        arr.ptr = newPtr
+        arr.cap = newCap
+    }
+    
+    arr[arr.len] = value
+    arr.len += 1
+}
+
+extern fn printf(fmt: string, ...args: any)
+extern fn malloc(size: usize): voidptr
+extern fn realloc(ptr: voidptr, size: usize): voidptr
+extern fn memcpy(dest: voidptr, src: voidptr, n: usize)

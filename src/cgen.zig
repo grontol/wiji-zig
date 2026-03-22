@@ -6,7 +6,7 @@ const Type = types.Type;
 const TypeId = types.TypeId;
 const Symbol = @import("symbol.zig").Symbol;
 
-const macros =
+const dyn_array_append_macro =
 \\#define DYN_ARRAY_APPEND(typ, arr, value) do {                                \
 \\    if ((arr)->len + 1 > (arr)->cap) {                                        \
 \\        size_t new_cap;                                                       \
@@ -20,18 +20,18 @@ const macros =
 \\            new_items = malloc(new_cap * sizeof(typ));                        \
 \\                                                                              \
 \\            for (size_t a = 0; a < (arr)->len; a++) {                         \
-\\                ((typ*)new_items)[a] = (arr)->items[a];                       \
+\\                ((typ*)new_items)[a] = (arr)->ptr[a];                       \
 \\            }                                                                 \
 \\        }                                                                     \
 \\        else {                                                                \
-\\            new_items = realloc((arr)->items, new_cap * sizeof(typ));         \
+\\            new_items = realloc((arr)->ptr, new_cap * sizeof(typ));         \
 \\        }                                                                     \
 \\                                                                              \
-\\        (arr)->items = new_items;                                             \
+\\        (arr)->ptr = new_items;                                             \
 \\        (arr)->cap = new_cap;                                                 \
 \\    }                                                                         \
 \\                                                                              \
-\\    (arr)->items[(arr)->len++] = value;                                       \
+\\    (arr)->ptr[(arr)->len++] = value;                                       \
 \\} while(0)
 ;
 
@@ -49,6 +49,8 @@ const Cgen = struct {
     indent: usize = 0,
     hidden_var_index: usize = 0,
     generated_modules: std.AutoHashMap(usize, bool),
+    
+    dyn_array_append_generated: bool = false,
     
     fn init(allocator: std.mem.Allocator) Cgen {
         return Cgen{
@@ -94,6 +96,19 @@ const Cgen = struct {
         self.cur_src.print(self.allocator, fmt, args) catch unreachable;
     }
     
+    fn genDynArrayAppendMacro(self: *Cgen) void {
+        if (self.dyn_array_append_generated) return;
+        
+        const cur_src = self.cur_src;
+        
+        self.setToBuiltin();        
+        self.writeArgs("{s}", .{ dyn_array_append_macro });
+        
+        self.cur_src = cur_src;
+        
+        self.dyn_array_append_generated = true;
+    }
+    
     fn writeSymbol(self: *Cgen, symbol: Symbol) void {
         for (symbol.namespaces) |namespace| {
             self.writeArgs("{s}___", .{namespace});
@@ -137,9 +152,6 @@ const Cgen = struct {
         self.write("typedef float    f32;\n");
         self.write("typedef double   f64;\n");
         self.write("typedef const char* string;\n\n");
-        
-        self.setToBuiltin();        
-        self.writeArgs("{s}", .{ macros });
         
         self.genModule(module);
         
@@ -210,7 +222,8 @@ const Cgen = struct {
                 }
                 
                 self.genType(param.typ);
-                self.writeArgs(" {s}", .{param.name.text});
+                self.write(" ");
+                self.writeSymbol(param.name);
             }
             
             self.write(");\n");
@@ -230,7 +243,8 @@ const Cgen = struct {
                 }
                 
                 self.genType(param.typ);
-                self.writeArgs(" {s}", .{param.name.text});
+                self.write(" ");
+                self.writeSymbol(param.name);
             }
             
             self.write(") ");
@@ -494,7 +508,7 @@ const Cgen = struct {
                 self.write("&");
             }
             
-            self.writeArgs("{s}.items[{s}];\n", .{iter_name, index_var_name});
+            self.writeArgs("{s}.ptr[{s}];\n", .{iter_name, index_var_name});
         }
         
         self.writeIndent();
@@ -585,7 +599,7 @@ const Cgen = struct {
     fn genArrayValue(self: *Cgen, arr: *const tast.ArrayValue, typ: *const Type) void {
         self.write("(");
         self.genType(typ);
-        self.write("){{ .items = ");
+        self.write("){{ .ptr = ");
         
         self.write("(");
         self.genType(typ.value.array.child);
@@ -604,7 +618,15 @@ const Cgen = struct {
     
     fn genArrayIndex(self: *Cgen, arr: *const tast.ArrayIndex) void {
         self.genExpr(arr.callee);
-        self.write(".items[");
+        
+        if (arr.is_reference) {
+            self.write("->");
+        }
+        else {
+            self.write(".");
+        }
+        
+        self.write("ptr[");
         self.genExpr(arr.index);
         self.write("]");
     }
@@ -613,12 +635,48 @@ const Cgen = struct {
         switch (builtin.*) {
             .array_len => {
                 self.genExpr(builtin.array_len.arr);
-                self.write(".len");
+                if (builtin.array_len.is_reference) {
+                    self.write("->");
+                }
+                else {
+                    self.write(".");
+                }
+                
+                self.write("len");
+            },
+            .array_ptr => {
+                self.genExpr(builtin.array_ptr.arr);
+                if (builtin.array_ptr.is_reference) {
+                    self.write("->");
+                }
+                else {
+                    self.write(".");
+                }
+                
+                self.write("ptr");
+            },
+            .dynarray_cap => {
+                self.genExpr(builtin.dynarray_cap.arr);
+                if (builtin.dynarray_cap.is_reference) {
+                    self.write("->");
+                }
+                else {
+                    self.write(".");
+                }
+                
+                self.write("cap");
             },
             .dynarray_append => {
+                self.genDynArrayAppendMacro();
+                
                 self.write("DYN_ARRAY_APPEND(");
                 self.genType(builtin.dynarray_append.arr.typ.value.array.child);
-                self.write(", &");
+                self.write(", ");
+                
+                if (!builtin.dynarray_append.is_reference) {
+                    self.write("&");
+                }
+                
                 self.genExpr(builtin.dynarray_append.arr);
                 
                 for (args) |arg| {
@@ -700,7 +758,6 @@ const Cgen = struct {
     fn genType(self: *Cgen, typ: *const Type) void {
         switch (typ.value) {
             .unknown,
-            .numeric,
             .bool,
             .char,
             .string,
@@ -708,9 +765,23 @@ const Cgen = struct {
                 typ.getText(self.cur_src, self.allocator);
                 return;
             },
+            .numeric => {
+                if (typ.value.numeric == .usize) {
+                    self.write("size_t");
+                }
+                else {
+                    typ.getText(self.cur_src, self.allocator);
+                }
+                
+                return;
+            },
             .reference => {
                 self.genType(typ.value.reference.child);
                 self.write("*");
+                return;
+            },
+            .voidptr => {
+                self.write("void*");
                 return;
             },
             
@@ -736,10 +807,10 @@ const Cgen = struct {
                     self.setToList(&temp);
                     
                     if (typ.value.array.is_dyn) {
-                        self.writeArgs("typedef struct {{ {[typ]s}* items; size_t len; size_t cap; }} {[typ]s}_dynarray;\n", .{ .typ = temp_child.items });
+                        self.writeArgs("typedef struct {{ {[typ]s}* ptr; size_t len; size_t cap; }} {[typ]s}_dynarray;\n", .{ .typ = temp_child.items });
                     }
                     else {
-                        self.writeArgs("typedef struct {{ {[typ]s}* items; size_t len; }} {[typ]s}_array;\n", .{ .typ = temp_child.items });
+                        self.writeArgs("typedef struct {{ {[typ]s}* ptr; size_t len; }} {[typ]s}_array;\n", .{ .typ = temp_child.items });
                     }
                     
                     self.setToTypedef();
@@ -807,6 +878,11 @@ const Cgen = struct {
                     self.type_map.put(typ.type_id, enum_name) catch unreachable;
                     
                     self.writeArgs("{s}", .{enum_name});
+                },
+                
+                .type_param => {
+                    // std.debug.panic("Type param should be resolved at typechecking step : {s}", .{typ.getTextLeak(self.allocator)});
+                    self.writeArgs("{s}", .{typ.getTextLeak(self.allocator)});
                 },
                 
                 else => {

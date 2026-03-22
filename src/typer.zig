@@ -99,6 +99,10 @@ const Typer = struct {
     cur_breakable: ?*tast.Stmt = null,
     cur_container_type: ?*const Type = null,
     
+    generic_fn_decls: std.AutoHashMap(u64, *FnDeclData),
+    generic_fn_monomorphized: std.AutoHashMap(u64, Symbol),
+    fn_decls: std.ArrayList(tast.FnDecl) = .empty,
+    
     fn init(
         arena: std.mem.Allocator,
         temp_allocator: std.mem.Allocator,
@@ -116,7 +120,15 @@ const Typer = struct {
             .type_manager = type_manager,
             .symbol_manager = symbol_manager,
             .children = children,
+            
+            .generic_fn_decls = std.AutoHashMap(u64, *FnDeclData).init(temp_allocator),
+            .generic_fn_monomorphized = std.AutoHashMap(u64, Symbol).init(temp_allocator),
         };
+    }
+    
+    fn deinit(self: *Typer) void {
+        self.generic_fn_decls.deinit();
+        self.generic_fn_monomorphized.deinit();
     }
     
     fn typeModule(self: *Typer, scope: *Scope, module: *const ast.Module, module_id: usize, module_name: []const u8) tast.Module {
@@ -144,7 +156,7 @@ const Typer = struct {
         }
         
         for (self.struct_decl_datas.items) |struct_decl_data| {
-            struct_decl_data.typ.value.@"struct".calculate(self.reporter);
+            struct_decl_data.typ.value.@"struct".calculate(struct_decl_data.typ, self.reporter);
         }
         
         for (self.struct_decl_datas.items) |struct_decl_data| {
@@ -155,8 +167,13 @@ const Typer = struct {
             self.typeEnumDeclMember(enum_decl_data.scope, enum_decl_data.ast, enum_decl_data.typ);
         }
         
+        for (self.fn_decl_datas.items) |*decl| {
+            if (decl.tast.isGeneric()) {
+                self.generic_fn_decls.put(decl.typ.type_id, decl) catch unreachable;
+            }
+        }
+        
         var var_decls = std.ArrayList(tast.VarDecl).empty;
-        var fn_decls = self.arena.alloc(tast.FnDecl, self.fn_decl_datas.items.len) catch unreachable;
         
         var var_decl_symbol_map = std.AutoHashMap(usize, usize).init(self.temp_allocator);
         defer var_decl_symbol_map.deinit();
@@ -170,23 +187,25 @@ const Typer = struct {
             self.resolveVarDecl(decl, &var_decl_symbol_map, &var_decls);
         }
         
-        for (self.fn_decl_datas.items, 0..) |*decl, i| {
-            if (decl.ast.body != null) {
-                self.typeFnDeclBody(decl.scope, decl.ast, &decl.tast);
+        for (self.fn_decl_datas.items) |*decl| {
+            if (!decl.tast.isGeneric()) {
+                if (decl.ast.body != null) {
+                    self.typeFnDeclBody(decl.scope, decl.ast, &decl.tast);
+                }
+                
+                self.fn_decls.append(self.temp_allocator, decl.tast) catch unreachable;
             }
-            
-            fn_decls[i] = decl.tast;
         }
         
-        self.var_decl_datas.clearAndFree(self.temp_allocator);
-        self.fn_decl_datas.clearAndFree(self.temp_allocator);
-        self.struct_decl_datas.clearAndFree(self.temp_allocator);
-        self.enum_decl_datas.clearAndFree(self.temp_allocator);
+        self.var_decl_datas.deinit(self.temp_allocator);
+        self.fn_decl_datas.deinit(self.temp_allocator);
+        self.struct_decl_datas.deinit(self.temp_allocator);
+        self.enum_decl_datas.deinit(self.temp_allocator);
         
         return .{
             .id = module_id,
             .var_decls = self.collectAndFreeTempList(tast.VarDecl, &var_decls),
-            .fn_decls = fn_decls,
+            .fn_decls = self.collectAndFreeTempList(tast.FnDecl, &self.fn_decls),
             .public_symbols = public_symbols,
             .children = children.items,
         };
@@ -305,18 +324,27 @@ const Typer = struct {
         
         var params = std.ArrayList(tast.FnParam).initCapacity(self.arena, fn_decl.params.len) catch unreachable;
         var param_types = std.ArrayList(*const Type).initCapacity(self.arena, fn_decl.params.len) catch unreachable;
+        var type_param_types = std.ArrayList(*Type).initCapacity(self.arena, fn_decl.type_params.len) catch unreachable;
         var has_default = false;
         var is_variadic = false;
         var return_typ = types.VOID;
         
         const new_scope = scope.inheritWithMode(.local, scope.allocator);
+        var type_param_symbols: []Symbol = &.{};
         
-        for (fn_decl.type_params, 0..) |p, i| {
-            const type_param_name = self.getTokenText(p);
-            const type_param_symbol = self.symbol_manager.createSymbol(p, false);
-            const type_param_typ = self.type_manager.createTypeParam(type_param_symbol, i);
+        if (fn_decl.type_params.len > 0) {
+            type_param_symbols = self.arena.alloc(Symbol, fn_decl.type_params.len) catch unreachable;
             
-            new_scope.set(type_param_name, type_param_symbol, type_param_typ, true, .constant);
+            for (fn_decl.type_params, 0..) |p, i| {
+                const type_param_name = self.getTokenText(p);
+                const type_param_symbol = self.symbol_manager.createSymbol(p, false);
+                const type_param_typ = self.type_manager.createTypeParam(type_param_symbol, i);
+                
+                new_scope.set(type_param_name, type_param_symbol, type_param_typ, true, .constant);
+                type_param_symbols[i] = type_param_symbol;
+                
+                type_param_types.appendAssumeCapacity(type_param_typ);
+            }
         }
         
         for (fn_decl.params) |param| {
@@ -380,13 +408,15 @@ const Typer = struct {
         }
         
         if (fn_decl.return_typ) |typ| {
-            return_typ = self.typeType(scope, &typ);
+            return_typ = self.typeType(new_scope, &typ);
         }
         
         const namespaced = if (fn_decl.is_extern or scope.mode == .module and std.mem.eql(u8, fn_name, "main")) false else true;
         const fn_name_symbol = self.symbol_manager.createSymbol(fn_decl.name, namespaced);
         const fn_typ = self.type_manager.createFn(
+            fn_name_symbol,
             param_types.items,
+            type_param_types.items,
             return_typ,
             is_variadic,
             false,
@@ -403,6 +433,7 @@ const Typer = struct {
             .name = fn_name_symbol,
             .return_typ = return_typ,
             .params = params.items,
+            .type_params = type_param_symbols,
             .body = null,
         };
         
@@ -790,7 +821,7 @@ const Typer = struct {
         var_decl_data.state = .resolving;
         
         var deps = std.ArrayList(usize).empty;
-        defer deps.clearAndFree(self.temp_allocator);
+        defer deps.deinit(self.temp_allocator);
         
         if (var_decl_data.ast.value) |value| {
             self.collectSymbols(var_decl_data.scope, value, &deps, null);
@@ -962,8 +993,13 @@ const Typer = struct {
                 is_lvalue = true;
             },
             .builtin => {
-                if (lhs.value.builtin == .array_len) {
-                    is_lvalue = true;
+                switch (lhs.value.builtin) {
+                    .array_len,
+                    .array_ptr,
+                    .dynarray_cap => {
+                        is_lvalue = true;
+                    },
+                    else => {}
                 }
             },
             
@@ -1062,22 +1098,119 @@ const Typer = struct {
         
         var typed_args = std.ArrayList(tast.Expr).initCapacity(self.arena, call.args.len) catch unreachable;
         
-        for (call.args, 0..) |arg, i| {
-            const index = if (i < param_types.len - skip_param) i + skip_param
-            else if (is_variadic) param_types.len - skip_param - 1 else unreachable;
+        // Generic function
+        if (callee.typ.value.func.type_params.len > 0) {
+            const type_params = callee.typ.value.func.type_params;
             
-            const expr = self.typeExpr(scope, &arg, param_types[index]);
-            typed_args.appendAssumeCapacity(expr);
+            // Reset type_params for current function call
+            for (type_params) |type_param| {
+                type_param.value.type_param.resolved_typ = null;
+            }
             
-            if (!expr.typ.canBeAssignedTo(param_types[index])) {
-                self.reporter.reportErrorAtSpan(
-                    arg.span,
-                    "Expected type `{s}` but got `{s}`",
-                    .{
-                        param_types[index].getTextLeak(self.arena),
-                        expr.typ.getTextLeak(self.arena),
-                    },
-                );
+            for (call.args, 0..) |arg, i| {
+                const index = if (i < param_types.len - skip_param) i + skip_param
+                else if (is_variadic) param_types.len - skip_param - 1 else unreachable;
+                
+                const exp_typ = self.type_manager.collapseTypeParam(param_types[index]);
+                
+                const expr = self.typeExpr(scope, &arg, exp_typ);
+                typed_args.appendAssumeCapacity(expr);
+                
+                if (!expr.typ.canBeAssignedToOrResolveGeneric(param_types[index], self.type_manager)) {
+                    self.reporter.reportErrorAtSpan(
+                        arg.span,
+                        "Expected type `{s}` but got `{s}`",
+                        .{
+                            param_types[index].getTextLeak(self.arena),
+                            expr.typ.getTextLeak(self.arena),
+                        },
+                    );
+                }
+            }
+            
+            var symbol: *Symbol = undefined;
+            
+            switch (callee.value) {
+                .identifier => { symbol = &callee.value.identifier.name; },
+                else => {
+                    std.debug.panic("TODO: typeFnCall generic switch callee {s}", .{@tagName(callee.value)});
+                }
+            }
+            
+            var h = callee.typ.hash;
+            
+            for (callee.typ.value.func.type_params) |type_param| {
+                std.debug.assert(type_param.value.type_param.resolved_typ != null);
+                h = types.combineHash(h, type_param.value.type_param.resolved_typ.?.hash);
+            }
+            
+            if (self.generic_fn_monomorphized.get(h)) |sym| {
+                symbol.* = sym;
+            }
+            else {
+                // If function is not monomorphized yet
+                // - Clone the type params
+                // - Set type param in scope with actual type
+                // - Replace function decl param & return type with actual type
+                // - Evaluate the function body
+                // - Restore scope with original type params
+                
+                const type_param_copies = self.temp_allocator.dupe(*Type, type_params) catch unreachable;
+                defer self.temp_allocator.free(type_param_copies);
+                
+                if (self.generic_fn_decls.get(callee.typ.type_id)) |fn_decl_data| {
+                    for (type_param_copies) |type_param| {
+                        fn_decl_data.scope.setType(type_param.value.type_param.name.text, type_param.value.type_param.resolved_typ.?);
+                    }
+                    
+                    if (fn_decl_data.ast.body) |_| {
+                        var monomorphized_tast = fn_decl_data.tast;
+                        monomorphized_tast.name = self.symbol_manager.cloneSymbol(&monomorphized_tast.name);
+                        monomorphized_tast.params = self.arena.dupe(tast.FnParam, monomorphized_tast.params) catch unreachable;
+                        
+                        for (monomorphized_tast.params) |*param| {
+                            param.typ = self.type_manager.collapseTypeParam(param.typ);
+                        }
+                        
+                        monomorphized_tast.return_typ = self.type_manager.collapseTypeParam(monomorphized_tast.return_typ);
+                        
+                        self.typeFnDeclBody(fn_decl_data.scope.inherit(), fn_decl_data.ast, &monomorphized_tast);
+                        
+                        self.fn_decls.append(self.temp_allocator, monomorphized_tast) catch unreachable;
+                        self.generic_fn_monomorphized.put(h, monomorphized_tast.name) catch unreachable;
+                        symbol.* = monomorphized_tast.name;
+                    }
+                    else {
+                        self.reporter.reportErrorAtSpan(fn_decl_data.span, "Generic function should have a body", .{});
+                    }
+                
+                    for (type_params) |type_param| {
+                        fn_decl_data.scope.setType(type_param.value.type_param.name.text, type_param);
+                    }
+                }
+                else {
+                    std.debug.panic("No generic function with type_id : {}", .{callee.typ.type_id});
+                }
+            }
+        }
+        else {
+            for (call.args, 0..) |arg, i| {
+                const index = if (i < param_types.len - skip_param) i + skip_param
+                else if (is_variadic) param_types.len - skip_param - 1 else unreachable;
+                
+                const expr = self.typeExpr(scope, &arg, param_types[index]);
+                typed_args.appendAssumeCapacity(expr);
+                
+                if (!expr.typ.canBeAssignedTo(param_types[index])) {
+                    self.reporter.reportErrorAtSpan(
+                        arg.span,
+                        "Expected type `{s}` but got `{s}`",
+                        .{
+                            param_types[index].getTextLeak(self.arena),
+                            expr.typ.getTextLeak(self.arena),
+                        },
+                    );
+                }
             }
         }
         
@@ -1991,8 +2124,17 @@ const Typer = struct {
     fn typeArrayIndex(self: *Typer, scope: *Scope, arr: *const ast.ArrayIndex) tast.Expr {
         const callee = self.makeExprPointer(self.typeExpr(scope, arr.callee, types.UNKNOWN));
         const index = self.makeExprPointer(self.typeExpr(scope, arr.index, types.UNKNOWN));
+        var is_reference = false;
+        var child_typ: *const Type = undefined;
         
-        if (callee.typ.kind != .array) {
+        if (callee.typ.kind == .array) {
+            child_typ = callee.typ.value.array.child;
+        }
+        else if (callee.typ.kind == .reference and callee.typ.value.reference.child.kind == .array) {
+            is_reference = true;
+            child_typ = callee.typ.value.reference.child.value.array.child;
+        }
+        else {
             self.reporter.reportErrorAtSpan(arr.callee.span, "Not an array", .{});
         }
         
@@ -2004,14 +2146,18 @@ const Typer = struct {
             );
         }
         
-        const mutability: Mutability = if (callee.mutability == .constant) .constant else .mutable;
+        const mutability: Mutability =
+            if (is_reference) .mutable
+            else if (callee.mutability == .constant) .constant
+            else .mutable;
         
         return .{
-            .typ = callee.typ.value.array.child,
+            .typ = child_typ,
             .mutability = mutability,
             .value = .{.array_index = .{
                 .callee = callee,
                 .index = index,
+                .is_reference = is_reference,
             }},
         };
     }
@@ -2052,7 +2198,7 @@ const Typer = struct {
         
         switch (callee.typ.kind) {
             .array => {
-                return self.typeArrayBuiltin(scope, callee, mem.member);
+                return self.typeArrayBuiltin(scope, callee, mem.member, false);
             },
             .@"struct" => {
                 return self.typeStructMember(scope, callee, mem.member, false);
@@ -2061,7 +2207,10 @@ const Typer = struct {
                 return self.typeEnumMember(scope, callee, mem.member, false);
             },
             .reference => {
-                if (callee.typ.value.reference.child.kind == .@"struct") {
+                if (callee.typ.value.reference.child.kind == .array) {
+                    return self.typeArrayBuiltin(scope, callee, mem.member, true);
+                }
+                else if (callee.typ.value.reference.child.kind == .@"struct") {
                     return self.typeStructMember(scope, callee, mem.member, true);
                 }
                 else if (callee.typ.value.reference.child.kind == .@"enum") {
@@ -2348,11 +2497,14 @@ const Typer = struct {
         );
     }
     
-    fn typeArrayBuiltin(self: *Typer, scope: *Scope, ar: *tast.Expr, member: Token) tast.Expr {
+    fn typeArrayBuiltin(self: *Typer, scope: *Scope, ar: *tast.Expr, member: Token, is_reference: bool) tast.Expr {
         _ = scope;
         
         const member_text = self.getTokenText(member);
-        const ar_typ = if (ar.typ.kind == .array) ar.typ.value.array else unreachable;
+        const ar_typ = 
+        if (ar.typ.kind == .reference) ar.typ.value.reference.child.value.array
+        else if (ar.typ.kind == .array) ar.typ.value.array
+        else unreachable;
         
         if (std.mem.eql(u8, member_text, "len")) {
             const args = self.arena.alloc(*const tast.Expr, 1) catch unreachable;
@@ -2361,7 +2513,27 @@ const Typer = struct {
             return .{
                 .typ = types.UNTYPED_INT,
                 .mutability = .mutable,
-                .value = .{.builtin = .{ .array_len = .{ .arr = ar } }}
+                .value = .{.builtin = .{ .array_len = .{ .arr = ar, .is_reference = is_reference } }}
+            };
+        }
+        else if (std.mem.eql(u8, member_text, "ptr")) {
+            const args = self.arena.alloc(*const tast.Expr, 1) catch unreachable;
+            args[0] = ar;
+            
+            return .{
+                .typ = self.type_manager.createPointer(ar_typ.child),
+                .mutability = .mutable,
+                .value = .{.builtin = .{ .array_ptr = .{ .arr = ar, .is_reference = is_reference } }}
+            };
+        }
+        else if (std.mem.eql(u8, member_text, "cap")) {
+            const args = self.arena.alloc(*const tast.Expr, 1) catch unreachable;
+            args[0] = ar;
+            
+            return .{
+                .typ = types.UNTYPED_INT,
+                .mutability = .mutable,
+                .value = .{.builtin = .{ .dynarray_cap = .{ .arr = ar, .is_reference = is_reference } }}
             };
         }
         else if (ar_typ.is_dyn) {
@@ -2370,9 +2542,9 @@ const Typer = struct {
                 param_types[0] = ar_typ.child;
                 
                 return .{
-                    .typ = self.type_manager.createFn(param_types, types.VOID, false, true, false),
+                    .typ = self.type_manager.createFn(null, param_types, &.{}, types.VOID, false, true, false),
                     .mutability = .constant,
-                    .value = .{ .builtin = .{ .dynarray_append = .{ .arr = ar } } }
+                    .value = .{ .builtin = .{ .dynarray_append = .{ .arr = ar, .is_reference = is_reference } } }
                 };
             }
             else {
@@ -2595,6 +2767,21 @@ const Typer = struct {
                 self.reporter.reportErrorAtToken(intr.name, "@typeOf needs exactly 1 argument", .{});
             }            
         }
+        else if (std.mem.eql(u8, name, "sizeOf")) {
+            if (intr.args.len == 1) {
+                const expr = self.typeExpr(scope, &intr.args[0], types.UNKNOWN);
+                
+                return .{
+                    .typ = types.UNTYPED_INT,
+                    .comptime_known = true,
+                    .mutability = .constant,
+                    .value = .{ .literal = .{ .int = expr.typ.size } }
+                };
+            }
+            else {
+                self.reporter.reportErrorAtToken(intr.name, "@typeOf needs exactly 1 argument", .{});
+            }            
+        }
         else {
             self.reporter.reportErrorAtToken(intr.name, "Unknown intrinsic `{s}`", .{name});
         }
@@ -2605,24 +2792,26 @@ const Typer = struct {
             ast.TypeKind.simple => {
                 const typ_text = self.getTokenText(typ.value.simple.name);
                 
-                if (std.mem.eql(u8, typ_text, "u8"))       { return types.U8; }
-                else if (std.mem.eql(u8, typ_text, "u16")) { return types.U16; }
-                else if (std.mem.eql(u8, typ_text, "u32")) { return types.U32; }
-                else if (std.mem.eql(u8, typ_text, "u64")) { return types.U64; }
-                else if (std.mem.eql(u8, typ_text, "i8"))  { return types.I8; }
-                else if (std.mem.eql(u8, typ_text, "i16")) { return types.I16; }
-                else if (std.mem.eql(u8, typ_text, "i32")) { return types.I32; }
-                else if (std.mem.eql(u8, typ_text, "i64")) { return types.I64; }
-                else if (std.mem.eql(u8, typ_text, "f32")) { return types.F32; }
-                else if (std.mem.eql(u8, typ_text, "f64")) { return types.F64; }
+                if (std.mem.eql(u8, typ_text, "u8"))         { return types.U8; }
+                else if (std.mem.eql(u8, typ_text, "u16"))   { return types.U16; }
+                else if (std.mem.eql(u8, typ_text, "u32"))   { return types.U32; }
+                else if (std.mem.eql(u8, typ_text, "u64"))   { return types.U64; }
+                else if (std.mem.eql(u8, typ_text, "usize")) { return types.USize; }
+                else if (std.mem.eql(u8, typ_text, "i8"))    { return types.I8; }
+                else if (std.mem.eql(u8, typ_text, "i16"))   { return types.I16; }
+                else if (std.mem.eql(u8, typ_text, "i32"))   { return types.I32; }
+                else if (std.mem.eql(u8, typ_text, "i64"))   { return types.I64; }
+                else if (std.mem.eql(u8, typ_text, "f32"))   { return types.F32; }
+                else if (std.mem.eql(u8, typ_text, "f64"))   { return types.F64; }
                 
                 else if (std.mem.eql(u8, typ_text, "bool"))   { return types.BOOL; }
                 else if (std.mem.eql(u8, typ_text, "char"))   { return types.CHAR; }
                 else if (std.mem.eql(u8, typ_text, "string")) { return types.STRING; }
                 else if (std.mem.eql(u8, typ_text, "range"))  { return types.RANGE; }
                 
-                else if (std.mem.eql(u8, typ_text, "void"))   { return types.VOID; }
-                else if (std.mem.eql(u8, typ_text, "any"))    { return types.ANY; }
+                else if (std.mem.eql(u8, typ_text, "void"))    { return types.VOID; }
+                else if (std.mem.eql(u8, typ_text, "any"))     { return types.ANY; }
+                else if (std.mem.eql(u8, typ_text, "voidptr")) { return types.VOID_PTR; }
                 
                 else {
                     if (scope.get(typ_text)) |sym| {
@@ -2723,7 +2912,7 @@ const Typer = struct {
     
     fn collectAndFreeTempList(self: *Typer, comptime T: type, list: *std.ArrayList(T)) []const T {
         const res = self.arena.dupe(T, list.items) catch unreachable;
-        list.clearAndFree(self.temp_allocator);
+        list.deinit(self.temp_allocator);
         
         return res;
     }
@@ -2750,6 +2939,7 @@ pub fn typecheck(
     defer std.debug.assert(gpa.deinit() == .ok);
     
     var typer = Typer.init(arena, temp_allocator, reporter, file_manager, type_manager, symbol_manager, children);
+    defer typer.deinit();
     var scope = Scope.init(arena, .module);
     // defer scope.deinit();
     

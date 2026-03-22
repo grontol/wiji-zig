@@ -1,3 +1,6 @@
 extern pub fn printf(fmt: string, ...args: any)
-
+extern pub fn malloc(size: usize): voidptr
+extern pub fn realloc(ptr: voidptr, size: usize): voidptr
+extern pub fn memcpy(dest: voidptr, src: voidptr, n: usize)
 extern pub fn rand(): i32
+

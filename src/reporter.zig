@@ -64,6 +64,7 @@ fn printFileLoc(self: Self, file_id: usize, line: usize, col: usize, start: usiz
         .dev => {
             const filename = self.file_manager.getFilename(file_id);
             writer.print("{s}:{d}:{d}:\n" ++ ANSI_RED, .{ filename, line, col }) catch {};
+            writer.print("Error: ", .{}) catch {};
             writer.print(msg, args) catch {};
             writer.print(ANSI_RESET ++ "\n", .{}) catch {};
             writer.flush() catch {};
@@ -76,6 +77,7 @@ fn printFileLoc(self: Self, file_id: usize, line: usize, col: usize, start: usiz
         .normal => {
             const filename = self.file_manager.getFilename(file_id);
             writer.print("{s}:{d}:{d}:\n" ++ ANSI_RED, .{ filename, line, col }) catch {};
+            writer.print("Error: ", .{}) catch {};
             writer.print(msg, args) catch {};
             writer.print(ANSI_RESET ++ "\n", .{}) catch {};
             writer.flush() catch {};

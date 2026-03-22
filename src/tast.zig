@@ -63,9 +63,14 @@ pub const FnDecl = struct {
     extern_abi: ?[]const u8,
     is_public: bool,
     name: Symbol,
-    params: []const FnParam,
+    params: []FnParam,
+    type_params: []const Symbol,
     return_typ: *const Type,
     body: ?Block,
+    
+    pub fn isGeneric(self: *const FnDecl) bool {
+        return self.type_params.len > 0;
+    }
 };
 
 pub const FnCall = struct {
@@ -163,6 +168,7 @@ pub const ArrayValue = struct {
 pub const ArrayIndex = struct {
     callee: *Expr,
     index: *Expr,
+    is_reference: bool,
 };
 
 pub const StructValue = struct {
@@ -228,12 +234,28 @@ pub const StringConcat = struct {
 
 pub const BuiltinKind = enum {
     array_len,
+    array_ptr,
+    dynarray_cap,
     dynarray_append,
 };
 
 pub const Builtin = union(BuiltinKind) {
-    array_len: struct { arr: *Expr },
-    dynarray_append: struct { arr: *Expr },
+    array_len: struct {
+        arr: *Expr,
+        is_reference: bool,
+    },
+    array_ptr: struct {
+        arr: *Expr,
+        is_reference: bool,
+    },
+    dynarray_cap: struct {
+        arr: *Expr,
+        is_reference: bool,
+    },
+    dynarray_append: struct {
+        arr: *Expr,
+        is_reference: bool,
+    },
 };
 
 pub const StmtKind = enum {

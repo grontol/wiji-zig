@@ -69,13 +69,25 @@ pub const SymbolManager = struct {
         
         const sym = Symbol{
             .id = self.global_index,
-            .text = self.createName(name),
+            .text = name,
             .token = placeholder_token,
             .namespaces = namespaces,
         };
         
         self.global_index += 1;
         
+        return sym;
+    }
+    
+    pub fn cloneSymbol(self: *SymbolManager, symbol: *const Symbol) Symbol {
+        const new_name = std.fmt.allocPrint(self.allocator, "{s}_{}", .{symbol.text, self.global_index}) catch unreachable;
+        
+        var sym = symbol.*;
+        
+        sym.id = self.global_index;
+        sym.text = new_name;
+        
+        self.global_index += 1;
         return sym;
     }
     

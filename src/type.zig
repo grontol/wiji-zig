@@ -18,6 +18,7 @@ pub const NumericKind = enum(u16) {
     u16,
     u32,
     u64,
+    usize,
     
     f32 = TYPE_FLAG_FLOAT,
     f64,
@@ -64,10 +65,13 @@ pub const TypeKind = enum {
     tuple,
     generic,
     typ,
+    voidptr,
 };
 
 pub const TypeFunc = struct {
+    name: ?Symbol,
     params: []const *const Type,
+    type_params: []const *Type,
     returns: *const Type,
     is_variadic: bool,
     is_builtin: bool,
@@ -122,7 +126,7 @@ pub const TypeStruct = struct {
         self.methods = methods;
     }
     
-    pub fn calculate(self: *TypeStruct, reporter: *const Reporter) void {
+    pub fn calculate(self: *TypeStruct, typ: *Type, reporter: *const Reporter) void {
         self.state = .calculating;
         
         var size: u16 = 0;
@@ -130,6 +134,7 @@ pub const TypeStruct = struct {
         
         for (self.fields) |*field| {
             if (field.typ.value == .@"struct") {
+                const child_typ_ptr: *Type = @constCast(field.typ);
                 const child_struct_ptr: *TypeStruct = @constCast(&field.typ.value.@"struct");
                 
                 if (child_struct_ptr.state == .calculating) {
@@ -140,7 +145,7 @@ pub const TypeStruct = struct {
                     );
                 }
                 
-                child_struct_ptr.calculate(reporter);
+                child_struct_ptr.calculate(child_typ_ptr, reporter);
             }
             
             const field_size = field.typ.size;
@@ -162,6 +167,9 @@ pub const TypeStruct = struct {
             size += alignment - (size % alignment);
         }
         
+        typ.size = size;
+        typ.alignment = alignment;
+        
         self.state = .done;
     }
 };
@@ -181,6 +189,7 @@ pub const Type = struct {
         type_param: struct {
             name: Symbol,
             index: usize,
+            resolved_typ: ?*const Type = null,
         },
         unknown_enum,
         void,
@@ -212,6 +221,7 @@ pub const Type = struct {
         typ: struct {
             child: *const Type,
         },
+        voidptr,
     },
     size: u16,
     alignment: u16,
@@ -223,6 +233,7 @@ pub const Type = struct {
         if (self.value == TypeKind.unknown) return true;
         if (other.value == TypeKind.unknown) return true;
         if (self.isSame(other)) return true;
+        if (self.kind == .voidptr and other.kind == .pointer or self.kind == .pointer and other.kind == .voidptr) return true;
         if (self.kind != other.kind) return false;
         
         switch (self.kind) {
@@ -277,6 +288,35 @@ pub const Type = struct {
         return true;
     }
     
+    pub fn canBeAssignedToOrResolveGeneric(self: *const Type, other: *const Type, type_manager: *TypeManager) bool {
+        if (self.canBeAssignedTo(other)) return true;
+        
+        if (other.kind == .type_param) {
+            if (other.value.type_param.resolved_typ) |resolved_typ| {
+                return self.canBeAssignedTo(resolved_typ);
+            }
+            else {
+                const other_non_const: *Type = @constCast(other);
+                other_non_const.value.type_param.resolved_typ = self.coerceIntoRuntime(type_manager);
+                return true;
+            }
+        }
+        
+        if (self.kind != other.kind) return false;
+        
+        switch (self.kind) {
+            .reference => {
+                return self.value.reference.child.canBeAssignedToOrResolveGeneric(other.value.reference.child, type_manager);
+            },
+            .array => {
+                return self.value.array.child.canBeAssignedToOrResolveGeneric(other.value.array.child, type_manager);
+            },
+            else => {}
+        }
+        
+        return false;
+    }
+    
     pub fn canBeUsedAsCond(self: *const Type) bool {
         switch (self.kind) {
             TypeKind.bool,
@@ -328,7 +368,14 @@ pub const Type = struct {
             TypeKind.reference => {
                 return self.value.reference.child.isSame(other.value.reference.child);
             },
+            TypeKind.pointer => {
+                return self.value.pointer.child.isSame(other.value.pointer.child);
+            },
             TypeKind.@"struct" => return false,
+            TypeKind.type_param => return self.type_id == other.type_id,
+            TypeKind.typ => {
+                return self.value.typ.child.isSame(other.value.typ.child);
+            },
             else => {
                 std.debug.panic("TODO: Type.isSame {s}", .{@tagName(self.value)});
             }
@@ -398,12 +445,14 @@ pub const Type = struct {
             TypeKind.bool         => { out.appendSlice(allocator, "bool") catch unreachable; },
             TypeKind.any          => { out.appendSlice(allocator, "any") catch unreachable; },
             TypeKind.range        => { out.appendSlice(allocator, "range") catch unreachable; },
+            TypeKind.voidptr      => { out.appendSlice(allocator, "voidptr") catch unreachable; },
             TypeKind.numeric      => {
                 switch (self.value.numeric) {
                     NumericKind.u8            => { out.appendSlice(allocator, "u8") catch unreachable; },
                     NumericKind.u16           => { out.appendSlice(allocator, "u16") catch unreachable; },
                     NumericKind.u32           => { out.appendSlice(allocator, "u32") catch unreachable; },
                     NumericKind.u64           => { out.appendSlice(allocator, "u64") catch unreachable; },
+                    NumericKind.usize         => { out.appendSlice(allocator, "usize") catch unreachable; },
                     NumericKind.i8            => { out.appendSlice(allocator, "i8") catch unreachable; },
                     NumericKind.i16           => { out.appendSlice(allocator, "i16") catch unreachable; },
                     NumericKind.i32           => { out.appendSlice(allocator, "i32") catch unreachable; },
@@ -462,6 +511,11 @@ pub const Type = struct {
                 self.value.reference.child.getText(out, allocator);
             },
             
+            TypeKind.pointer => {
+                out.appendSlice(allocator, "*") catch unreachable;
+                self.value.pointer.child.getText(out, allocator);
+            },
+            
             TypeKind.typ => {
                 out.print(allocator, "type({s}:", .{@tagName(self.value.typ.child.value)}) catch unreachable;
                 self.value.typ.child.getText(out, allocator);
@@ -469,7 +523,14 @@ pub const Type = struct {
             },
             
             TypeKind.type_param => {
-                out.print(allocator, "{s}", .{self.value.type_param.name.text}) catch unreachable;
+                if (self.value.type_param.resolved_typ) |typ| {
+                    out.print(allocator, "type_param(", .{}) catch unreachable;
+                    typ.getText(out, allocator);
+                    out.print(allocator, ")", .{}) catch unreachable;
+                }
+                else {
+                    out.print(allocator, "{s}", .{self.value.type_param.name.text}) catch unreachable;
+                }
             },
             
             else => {
@@ -483,23 +544,25 @@ pub const UNKNOWN       = &Type{ .size = 0,  .alignment = 0, .type_id = 0,  .has
 pub const VOID          = &Type{ .size = 0,  .alignment = 0, .type_id = 1,  .hash = 1,  .kind = .void,    .value = .void };
 pub const U8            = &Type{ .size = 1,  .alignment = 1, .type_id = 2,  .hash = 2,  .kind = .numeric, .value = .{ .numeric = .u8 } };
 pub const U16           = &Type{ .size = 2,  .alignment = 2, .type_id = 3,  .hash = 3,  .kind = .numeric, .value = .{ .numeric = .u16 } };
-pub const U32           = &Type{ .size = 3,  .alignment = 3, .type_id = 4,  .hash = 4,  .kind = .numeric, .value = .{ .numeric = .u32 } };
-pub const U64           = &Type{ .size = 4,  .alignment = 4, .type_id = 5,  .hash = 5,  .kind = .numeric, .value = .{ .numeric = .u64 } };
-pub const I8            = &Type{ .size = 1,  .alignment = 1, .type_id = 6,  .hash = 6,  .kind = .numeric, .value = .{ .numeric = .i8 } };
-pub const I16           = &Type{ .size = 2,  .alignment = 2, .type_id = 7,  .hash = 7,  .kind = .numeric, .value = .{ .numeric = .i16 } };
-pub const I32           = &Type{ .size = 3,  .alignment = 3, .type_id = 8,  .hash = 8,  .kind = .numeric, .value = .{ .numeric = .i32 } };
-pub const I64           = &Type{ .size = 4,  .alignment = 4, .type_id = 9,  .hash = 9,  .kind = .numeric, .value = .{ .numeric = .i64 } };
-pub const F32           = &Type{ .size = 4,  .alignment = 4, .type_id = 10, .hash = 10, .kind = .numeric, .value = .{ .numeric = .f32 } };
-pub const F64           = &Type{ .size = 8,  .alignment = 8, .type_id = 11, .hash = 11, .kind = .numeric, .value = .{ .numeric = .f64 } };
-pub const UNTYPED_INT   = &Type{ .size = 8,  .alignment = 8, .type_id = 12, .hash = 12, .kind = .numeric, .value = .{ .numeric = .untyped_int } };
-pub const UNTYPED_FLOAT = &Type{ .size = 8,  .alignment = 8, .type_id = 13, .hash = 13, .kind = .numeric, .value = .{ .numeric = .untyped_float } };
-pub const STRING        = &Type{ .size = 16, .alignment = 8, .type_id = 14, .hash = 14, .kind = .string,  .value = .string };
-pub const CHAR          = &Type{ .size = 1,  .alignment = 1, .type_id = 15, .hash = 15, .kind = .char,    .value = .char };
-pub const BOOL          = &Type{ .size = 1,  .alignment = 1, .type_id = 16, .hash = 16, .kind = .bool,    .value = .bool };
-pub const RANGE         = &Type{ .size = 8,  .alignment = 4, .type_id = 17, .hash = 17, .kind = .range,   .value = .range };
-pub const ANY           = &Type{ .size = 8,  .alignment = 8, .type_id = 18, .hash = 18, .kind = .any,     .value = .any };
-pub const UNKNOWN_ENUM  = &Type{ .size = 0,  .alignment = 0, .type_id = 19, .hash = 19, .kind = .unknown_enum, .value = .unknown_enum };
-pub const TYPE_PARAM    = &Type{ .size = 0,  .alignment = 0, .type_id = 20, .hash = 20, .kind = .type_param, .value = .type_param };
+pub const U32           = &Type{ .size = 4,  .alignment = 4, .type_id = 4,  .hash = 4,  .kind = .numeric, .value = .{ .numeric = .u32 } };
+pub const U64           = &Type{ .size = 8,  .alignment = 8, .type_id = 5,  .hash = 5,  .kind = .numeric, .value = .{ .numeric = .u64 } };
+pub const USize         = &Type{ .size = 8,  .alignment = 8, .type_id = 6,  .hash = 6,  .kind = .numeric, .value = .{ .numeric = .usize } };
+pub const I8            = &Type{ .size = 1,  .alignment = 1, .type_id = 7,  .hash = 6,  .kind = .numeric, .value = .{ .numeric = .i8 } };
+pub const I16           = &Type{ .size = 2,  .alignment = 2, .type_id = 8,  .hash = 7,  .kind = .numeric, .value = .{ .numeric = .i16 } };
+pub const I32           = &Type{ .size = 4,  .alignment = 4, .type_id = 9,  .hash = 8,  .kind = .numeric, .value = .{ .numeric = .i32 } };
+pub const I64           = &Type{ .size = 8,  .alignment = 8, .type_id = 10, .hash = 9,  .kind = .numeric, .value = .{ .numeric = .i64 } };
+pub const F32           = &Type{ .size = 4,  .alignment = 4, .type_id = 11, .hash = 11, .kind = .numeric, .value = .{ .numeric = .f32 } };
+pub const F64           = &Type{ .size = 8,  .alignment = 8, .type_id = 12, .hash = 12, .kind = .numeric, .value = .{ .numeric = .f64 } };
+pub const UNTYPED_INT   = &Type{ .size = 8,  .alignment = 8, .type_id = 13, .hash = 13, .kind = .numeric, .value = .{ .numeric = .untyped_int } };
+pub const UNTYPED_FLOAT = &Type{ .size = 8,  .alignment = 8, .type_id = 14, .hash = 14, .kind = .numeric, .value = .{ .numeric = .untyped_float } };
+pub const STRING        = &Type{ .size = 16, .alignment = 8, .type_id = 15, .hash = 15, .kind = .string,  .value = .string };
+pub const CHAR          = &Type{ .size = 1,  .alignment = 1, .type_id = 16, .hash = 16, .kind = .char,    .value = .char };
+pub const BOOL          = &Type{ .size = 1,  .alignment = 1, .type_id = 17, .hash = 17, .kind = .bool,    .value = .bool };
+pub const RANGE         = &Type{ .size = 8,  .alignment = 4, .type_id = 18, .hash = 18, .kind = .range,   .value = .range };
+pub const ANY           = &Type{ .size = 8,  .alignment = 8, .type_id = 19, .hash = 19, .kind = .any,     .value = .any };
+pub const UNKNOWN_ENUM  = &Type{ .size = 0,  .alignment = 0, .type_id = 20, .hash = 20, .kind = .unknown_enum, .value = .unknown_enum };
+pub const TYPE_PARAM    = &Type{ .size = 0,  .alignment = 0, .type_id = 21, .hash = 21, .kind = .type_param, .value = .type_param };
+pub const VOID_PTR      = &Type{ .size = 8,  .alignment = 8, .type_id = 22, .hash = 22, .kind = .voidptr, .value = .voidptr };
 
 pub const TypeManager = struct {
     arena: std.mem.Allocator,
@@ -585,9 +648,39 @@ pub const TypeManager = struct {
         }
     }
     
+    pub fn createPointer(self: *TypeManager, child: *const Type) *const Type {
+        const typ = Type{
+            .kind = .pointer,
+            .size = 8,
+            .alignment = child.alignment,
+            .type_id = self.cur_index,
+            .hash = combineHash(@intFromEnum(TypeKind.pointer), child.hash),
+            .value = .{.pointer = .{
+                .child = child,
+            }},
+        };
+        
+        const typ_ptr = self.type_map.get(typ);
+        
+        if (typ_ptr) |ptr| {
+            return ptr;
+        }
+        else {
+            const new_typ_ptr = self.arena.create(Type) catch unreachable;
+            new_typ_ptr.* = typ;
+            self.cur_index += 1;
+            
+            self.type_map.put(typ, new_typ_ptr) catch unreachable;
+            
+            return new_typ_ptr;
+        }
+    }
+    
     pub fn createFn(
         self: *TypeManager,
+        name: ?Symbol,
         params: []const *const Type,
+        type_params: []const *Type,
         return_typ: *const Type,
         is_variadic: bool,
         is_builtin: bool,
@@ -605,7 +698,9 @@ pub const TypeManager = struct {
             .type_id = self.cur_index,
             .hash = h,
             .value = .{.func = .{
+                .name = name,
                 .params = params,
+                .type_params = type_params,
                 .returns = return_typ,
                 .is_variadic = is_variadic,
                 .is_builtin = is_builtin,
@@ -704,7 +799,7 @@ pub const TypeManager = struct {
         }
     }
     
-    pub fn createTypeParam(self: *TypeManager, name: Symbol, index: usize) *const Type {
+    pub fn createTypeParam(self: *TypeManager, name: Symbol, index: usize) *Type {
         const typ = Type{
             .kind = .type_param,
             .size = 0,
@@ -725,6 +820,55 @@ pub const TypeManager = struct {
         
         return new_typ_ptr;
     }
+    
+    pub fn collapseTypeParam(self: *TypeManager, typ: *const Type) *const Type {
+        switch (typ.kind) {
+            .unknown,
+            .unknown_enum,
+            .void,
+            .numeric,
+            .string,
+            .char,
+            .bool,
+            .@"enum",
+            .any,
+            .range,
+            .func,
+            .voidptr,
+            .@"struct" => {
+                return typ;
+            },
+            .reference => {                
+                return self.createReference(self.collapseTypeParam(typ.value.reference.child));
+            },
+            .array => {
+                return self.createArray(self.collapseTypeParam(typ.value.array.child), typ.value.array.is_dyn, typ.value.array.len);
+            },
+            .pointer => {
+                std.debug.panic("TODO: collapseTypeParam pointer", .{});
+            },
+            .nullable => {
+                std.debug.panic("TODO: collapseTypeParam nullable", .{});
+            },
+            .tuple => {
+                std.debug.panic("TODO: collapseTypeParam tuple", .{});
+            },
+            .generic => {
+                std.debug.panic("TODO: collapseTypeParam generic", .{});
+            },
+            .typ => {
+                std.debug.panic("TODO: collapseTypeParam typ", .{});
+            },
+            .type_param => {
+                if (typ.value.type_param.resolved_typ) |res| {
+                    return res;
+                }
+                else {
+                    return typ;
+                }
+            },
+        }
+    }
 };
 
 fn TypeHashMap() type {
@@ -741,7 +885,7 @@ fn TypeHashMap() type {
     return std.HashMap(Type, *Type, Context, std.hash_map.default_max_load_percentage);
 }
 
-fn combineHash(a: u64, b: u64) u64 {
+pub fn combineHash(a: u64, b: u64) u64 {
     var x = a ^ b;
     x ^= x >> 32;
     x *%= 0xd6e8feb86659fd93;

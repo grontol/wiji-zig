@@ -75,14 +75,16 @@ fn main() {
 }
 
 fn spawnBullet(x: f32, y: f32) {
-    bullets.append(Bullet.new(x, y))
+    // bullets.append(Bullet.new(x, y))
+    daAppend(&bullets, Bullet.new(x, y))
 }
 
 fn spawnEnemy() {
     const x = rand() % SCREEN_WIDTH
     const y = rand() % SCREEN_HEIGHT / 2
     
-    enemies.append(Enemy.new(.green))
+    // enemies.append(Enemy.new(.green))
+    daAppend(&enemies, Enemy.new(.green))
 }
 
 fn removeDeads() {
@@ -249,4 +251,28 @@ struct Entity {
         
         return true
     }
+}
+
+fn daAppend<T>(arr: &[dyn]T, value: T) {
+    if arr.len + 1 > arr.cap {
+        var newCap: usize
+        
+        if arr.cap == 0 newCap = 16
+        else newCap = arr.cap * 2
+        
+        var newPtr: voidptr
+        if arr.cap == 0 {
+            newPtr = malloc(newCap * @sizeOf(T))
+            memcpy(arr.ptr, newPtr, arr.len * @sizeOf(T))
+        }
+        else {
+            newPtr = realloc(arr.ptr, newCap * @sizeOf(T))
+        }
+        
+        arr.ptr = newPtr
+        arr.cap = newCap
+    }
+    
+    arr[arr.len] = value
+    arr.len += 1
 }
