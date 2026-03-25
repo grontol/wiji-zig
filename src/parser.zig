@@ -642,6 +642,43 @@ const Parser = struct {
             name_token = self.ts.next();
         }
         
+        var type_params = std.ArrayList(Token).empty;
+        
+        if (self.ts.peek().kind == .Lt) {
+            _ = self.ts.next();
+            
+            if (self.ts.peek().kind == .Gt) {
+                self.reporter.reportErrorAtSpan(
+                    TokenSpan.from_tokens(self.ts.current(), self.ts.next()),
+                    "Expected at least 1 type param",
+                    .{}
+                );
+            }
+            
+            var has_comma = true;
+            
+            while (self.ts.hasNext()) {
+                if (self.ts.peek().kind == .Gt) {
+                    _ = self.ts.next();
+                    break;
+                }
+                
+                if (!has_comma) {
+                    self.reporter.reportErrorAtToken(self.ts.current(), "Expected comma", .{});
+                }
+                
+                type_params.append(self.temp_allocator, self.ts.nextExpect(.Identifier)) catch unreachable;
+                
+                if (self.ts.peek().kind == .Comma) {
+                    _ = self.ts.next();
+                    has_comma = true;
+                }
+                else {
+                    has_comma = false;
+                }
+            }
+        }
+        
         _ = self.ts.nextExpect(.OpenCurlyBracket);
         
         var fields = std.ArrayList(ast.StructField).empty;
@@ -766,6 +803,7 @@ const Parser = struct {
             .value = .{.struct_decl = .{
                 .is_public = pub_token != null,
                 .name = name_token,
+                .type_params = self.collectAndFreeTempList(Token, &type_params),
                 .struct_token = struct_token,
                 .fields = self.collectAndFreeTempList(ast.StructField, &fields),
                 .members = self.collectAndFreeTempList(ast.Expr, &members),
@@ -1405,7 +1443,7 @@ const Parser = struct {
                     typ = ast.Type{
                         .value = .{
                             .generic = .{
-                                .name = name_token,
+                                .base = name_token,
                                 .children = self.collectAndFreeTempList(ast.Type, &children),
                             }
                         },

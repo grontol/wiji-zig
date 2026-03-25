@@ -85,6 +85,7 @@ pub const StructDecl = struct {
     is_public: bool,
     name: ?Token,
     struct_token: Token,
+    type_params: []const Token,
     fields: []const StructField,
     members: []const Expr,
 };
@@ -343,7 +344,7 @@ pub const Type = struct {
             children: []const Type,
         },
         generic: struct {
-            name: Token,
+            base: Token,
             children: []const Type,
         },
         inline_struct: StructDecl,
@@ -949,7 +950,7 @@ pub const Printer = struct {
                 self.print(")", .{});
             },
             TypeKind.generic => {
-                self.print("{s}", .{self.tokenText(typ.value.generic.name)});
+                self.print("{s}", .{self.tokenText(typ.value.generic.base)});
                 self.print("(", .{});
                 
                 for (typ.value.generic.children, 0..) |child, i| {

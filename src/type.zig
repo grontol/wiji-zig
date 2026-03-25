@@ -102,6 +102,8 @@ pub const TypeStruct = struct {
     name: Symbol,
     field_map: std.StringHashMap(usize),
     method_map: std.StringHashMap(usize),
+    generic_base: ?*const Type,
+    type_params: []const *const Type,
     fields: []TypeStructField,
     methods: []const TypeMethod,
     state: enum {
@@ -216,7 +218,8 @@ pub const Type = struct {
             childen: []const *const Type,
         },
         generic: struct {
-            childen: []const *const Type,
+            base: *const Type,
+            children: []const *const Type,
         },
         typ: struct {
             child: *const Type,
@@ -311,10 +314,54 @@ pub const Type = struct {
             .array => {
                 return self.value.array.child.canBeAssignedToOrResolveGeneric(other.value.array.child, type_manager);
             },
-            else => {}
+            .@"struct" => {
+                if (self.value.@"struct".name.id == other.value.@"struct".name.id) {
+                    std.debug.assert(self.value.@"struct".type_params.len == other.value.@"struct".type_params.len);
+                    
+                    for (self.value.@"struct".type_params, 0..) |p, i| {
+                        if (!p.canBeAssignedToOrResolveGeneric(other.value.@"struct".type_params[i], type_manager)) {
+                            return false;
+                        }
+                    }
+                    
+                    return true;
+                }
+            },
+            else => {
+                std.debug.panic("TODO: canBeAssignedToOrResolveGeneric {s}", .{@tagName(self.kind)});
+            }
         }
         
         return false;
+    }
+    
+    pub fn resolveGeneric(self: *const Type, generic_map: std.AutoHashMap(usize, *const Type), type_manager: *TypeManager) ?*const Type {
+        switch (self.kind) {
+            .numeric => {
+                return self;
+            },
+            .type_param => {
+                if (generic_map.get(self.value.type_param.name.id)) |typ| {
+                    return typ;
+                }
+                else {
+                    return null;
+                }
+            },
+            .reference => {
+                type_manager.createReference(self.value.reference.child.resolveGeneric(generic_map, type_manager));
+            },
+            .array => {
+                type_manager.createArray(
+                    self.value.array.child.resolveGeneric(generic_map, type_manager),
+                    self.value.array.is_dyn,
+                    self.value.array.len,
+                );
+            },
+            else => {
+                std.debug.panic("TODO: resolveGeneric {s}", .{@tagName(self.kind)});
+            }
+        }
     }
     
     pub fn canBeUsedAsCond(self: *const Type) bool {
@@ -332,7 +379,8 @@ pub const Type = struct {
     }
     
     pub fn canBeCastTo(self: *const Type, other: *const Type) bool {
-        return self.kind == .numeric and other.kind == .numeric;
+        return (self.kind == .numeric or self.kind == .voidptr)
+            and (other.kind == .numeric or other.kind == .voidptr);
     }
     
     pub fn isSame(self: *const Type, other: *const Type) bool {
@@ -425,6 +473,78 @@ pub const Type = struct {
         return other;
     }
     
+    pub fn collapseTypeParam(self: *const Type, type_manager: *TypeManager) *const Type {
+        switch (self.kind) {
+            .unknown,
+            .unknown_enum,
+            .void,
+            .numeric,
+            .string,
+            .char,
+            .bool,
+            .@"enum",
+            .any,
+            .range,
+            .func,
+            .voidptr => {
+                return self;
+            },
+            .@"struct" => {
+                return self;
+            },
+            .reference => {                
+                return type_manager.createReference(self.value.reference.child.collapseTypeParam(type_manager));
+            },
+            .array => {
+                return type_manager.createArray(self.value.array.child.collapseTypeParam(type_manager), self.value.array.is_dyn, self.value.array.len);
+            },
+            .pointer => {
+                return type_manager.createPointer(self.value.pointer.child.collapseTypeParam(type_manager));
+            },
+            .nullable => {
+                std.debug.panic("TODO: collapseTypeParam nullable", .{});
+            },
+            .tuple => {
+                std.debug.panic("TODO: collapseTypeParam tuple", .{});
+            },
+            .generic => {
+                std.debug.panic("TODO: collapseTypeParam generic", .{});
+            },
+            .typ => {
+                std.debug.panic("TODO: collapseTypeParam typ", .{});
+            },
+            .type_param => {
+                if (self.value.type_param.resolved_typ) |res| {
+                    return res;
+                }
+                else {
+                    return self;
+                }
+            },
+        }
+    }
+    
+    pub fn fillGenericStruct(self: *const Type, type_manager: *TypeManager) void {
+        std.debug.assert(self.kind == .@"struct" and self.value.@"struct".generic_base != null);
+        
+        const base_struct_typ = self.value.@"struct".generic_base.?.value.@"struct";
+        const struct_typ: *TypeStruct = @constCast(&self.value.@"struct");
+            
+        for (base_struct_typ.type_params) |base_type_param| {
+            const ptr: *Type = @constCast(base_type_param);
+            ptr.value.type_param.resolved_typ = struct_typ.type_params[base_type_param.value.type_param.index];
+        }
+        
+        var fields = type_manager.arena.alloc(TypeStructField, base_struct_typ.fields.len) catch unreachable;
+        for (base_struct_typ.fields, 0..) |field, i| {
+            fields[i] = field;
+            fields[i].typ = fields[i].typ.collapseTypeParam(type_manager);
+        }
+        
+        struct_typ.fields = fields;
+        struct_typ.field_map = base_struct_typ.field_map;
+    }
+    
     pub fn isNumericInt(self: *const Type) bool {
         return self.kind == .numeric and self.value.numeric.isInt();
     }
@@ -500,6 +620,20 @@ pub const Type = struct {
             
             TypeKind.@"struct" => {
                 out.print(allocator, "{s}", .{self.value.@"struct".name.text}) catch unreachable;
+                
+                if (self.value.@"struct".type_params.len > 0) {
+                    out.print(allocator, "<", .{}) catch unreachable;
+                    
+                    for (self.value.@"struct".type_params, 0..) |p, i| {
+                        if (i > 0) {
+                            out.print(allocator, ", ", .{}) catch unreachable;
+                        }
+                        
+                        p.getText(out, allocator);
+                    }
+                    
+                    out.print(allocator, ">", .{}) catch unreachable;
+                }
             },
             
             TypeKind.@"enum" => {
@@ -514,6 +648,21 @@ pub const Type = struct {
             TypeKind.pointer => {
                 out.appendSlice(allocator, "*") catch unreachable;
                 self.value.pointer.child.getText(out, allocator);
+            },
+            
+            TypeKind.generic => {
+                self.value.generic.base.getText(out, allocator);
+                out.append(allocator, '<') catch unreachable;
+                
+                for (self.value.generic.children, 0..) |child, i| {
+                    if (i > 0) {
+                        out.appendSlice(allocator, ", ") catch unreachable;
+                    }
+                    
+                    child.getText(out, allocator);
+                }
+                
+                out.append(allocator, '>') catch unreachable;
             },
             
             TypeKind.typ => {
@@ -732,9 +881,11 @@ pub const TypeManager = struct {
             .type_id = self.cur_index,
             .hash = self.cur_index,
             .value = .{.@"struct" = .{
+                .generic_base = null,
                 .name = name,
                 .field_map = .init(self.arena),
                 .method_map = .init(self.arena),
+                .type_params = &.{},
                 .fields = &.{},
                 .methods = &.{},
                 .state = .unresolved,
@@ -769,6 +920,49 @@ pub const TypeManager = struct {
         self.type_map.put(typ, new_typ_ptr) catch unreachable;
         
         return new_typ_ptr;
+    }
+    
+    pub fn createGenericStruct(self: *TypeManager, base: *const Type, children: []const *const Type) *Type {
+        std.debug.assert(base.value == .@"struct");
+        
+        var h = base.hash;
+        for (children) |child| { h = combineHash(h, child.hash); }
+        
+        const typ = Type{
+            .kind = .@"struct",
+            .size = 0,
+            .alignment = 0,
+            .type_id = self.cur_index,
+            .hash = h,
+            // No need to fill details here
+            // Details will be filled later if generic type is not already saved
+            // Only `hash` field is checked for retrieving saved type
+            .value = .{.@"struct" = .{
+                .generic_base = base,
+                .name = base.value.@"struct".name,
+                .field_map = .init(self.arena),
+                .method_map = .init(self.arena),
+                .type_params = children,
+                .fields = &.{},
+                .methods = &.{},
+                .state = .unresolved,
+            }},
+        };
+        
+        const typ_ptr = self.type_map.get(typ);
+        
+        if (typ_ptr) |ptr| {
+            return ptr;
+        }
+        else {
+            const new_typ_ptr = self.arena.create(Type) catch unreachable;
+            new_typ_ptr.* = typ;
+            
+            self.cur_index += 1;
+            self.type_map.put(typ, new_typ_ptr) catch unreachable;
+            
+            return new_typ_ptr;
+        }
     }
     
     pub fn createType(self: *TypeManager, child: *const Type) *const Type {
@@ -819,55 +1013,6 @@ pub const TypeManager = struct {
         self.type_map.put(typ, new_typ_ptr) catch unreachable;
         
         return new_typ_ptr;
-    }
-    
-    pub fn collapseTypeParam(self: *TypeManager, typ: *const Type) *const Type {
-        switch (typ.kind) {
-            .unknown,
-            .unknown_enum,
-            .void,
-            .numeric,
-            .string,
-            .char,
-            .bool,
-            .@"enum",
-            .any,
-            .range,
-            .func,
-            .voidptr,
-            .@"struct" => {
-                return typ;
-            },
-            .reference => {                
-                return self.createReference(self.collapseTypeParam(typ.value.reference.child));
-            },
-            .array => {
-                return self.createArray(self.collapseTypeParam(typ.value.array.child), typ.value.array.is_dyn, typ.value.array.len);
-            },
-            .pointer => {
-                std.debug.panic("TODO: collapseTypeParam pointer", .{});
-            },
-            .nullable => {
-                std.debug.panic("TODO: collapseTypeParam nullable", .{});
-            },
-            .tuple => {
-                std.debug.panic("TODO: collapseTypeParam tuple", .{});
-            },
-            .generic => {
-                std.debug.panic("TODO: collapseTypeParam generic", .{});
-            },
-            .typ => {
-                std.debug.panic("TODO: collapseTypeParam typ", .{});
-            },
-            .type_param => {
-                if (typ.value.type_param.resolved_typ) |res| {
-                    return res;
-                }
-                else {
-                    return typ;
-                }
-            },
-        }
     }
 };
 

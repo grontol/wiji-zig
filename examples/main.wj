@@ -12,12 +12,20 @@ fn main() {
     val ys: [dyn]string = .[]
     val points: [dyn]Point = .[]
     
-    dynArrayAppend(&xs, 4)
-    dynArrayAppend(&ys, "Satu")
-    dynArrayAppend(&ys, "Dua")
-    dynArrayAppend(&ys, "Tiga")
-    dynArrayAppend(&points, .{10, 20})
-    dynArrayAppend(&points, .{50, 60})
+    const al: ArrayList<i32> = .{
+        ptr = 0 as voidptr,
+        len = 0,
+        cap = 0,
+    }
+    
+    dynArrayAppend(&al, 4)
+    
+    // dynArrayAppend(&xs, 4)
+    // dynArrayAppend(&ys, "Satu")
+    // dynArrayAppend(&ys, "Dua")
+    // dynArrayAppend(&ys, "Tiga")
+    // dynArrayAppend(&points, .{10, 20})
+    // dynArrayAppend(&points, .{50, 60})
     
     for x in xs {
         printf("%d\n", x)
@@ -32,7 +40,17 @@ fn main() {
     }
 }
 
-fn dynArrayAppend<T>(arr: &[dyn]T, value: T) {
+struct ArrayList<T> {
+    ptr: *T
+    len: usize
+    cap: usize
+    
+    // fn foo(self: &@Self) {
+    //     printf("ptr = %d", self.ptr)
+    // }
+}
+
+fn dynArrayAppend<T>(arr: &ArrayList<T>, value: T) {
     if arr.len + 1 > arr.cap {
         var newCap: usize
         

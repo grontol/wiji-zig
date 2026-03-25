@@ -73,6 +73,7 @@ const StructDeclData = struct {
     typ: *Type,
     ast: *const ast.StructDecl,
     scope: *Scope,
+    type_params: []const Symbol,
 };
 
 const EnumDeclData = struct {
@@ -103,6 +104,8 @@ const Typer = struct {
     generic_fn_monomorphized: std.AutoHashMap(u64, Symbol),
     fn_decls: std.ArrayList(tast.FnDecl) = .empty,
     
+    generic_structs: std.AutoHashMap(u64, *const Type),
+    
     fn init(
         arena: std.mem.Allocator,
         temp_allocator: std.mem.Allocator,
@@ -123,6 +126,8 @@ const Typer = struct {
             
             .generic_fn_decls = std.AutoHashMap(u64, *FnDeclData).init(temp_allocator),
             .generic_fn_monomorphized = std.AutoHashMap(u64, Symbol).init(temp_allocator),
+            
+            .generic_structs = std.AutoHashMap(u64, *const Type).init(temp_allocator),
         };
     }
     
@@ -138,10 +143,12 @@ const Typer = struct {
         self.symbol_manager.popNamespace();
         
         var public_symbols = std.StringHashMap(TypedSymbol).init(self.arena);
-        var iter = scope.syms.iterator();
-        
-        while (iter.next()) |entry| {
-            public_symbols.put(entry.key_ptr.*, entry.value_ptr.*) catch unreachable;
+        {
+            var iter = scope.syms.iterator();
+            
+            while (iter.next()) |entry| {
+                public_symbols.put(entry.key_ptr.*, entry.value_ptr.*) catch unreachable;
+            }
         }
         
         var children = std.ArrayList(*tast.Module).initCapacity(self.arena, self.children.count()) catch unreachable;
@@ -151,8 +158,21 @@ const Typer = struct {
             children.appendAssumeCapacity(entry.value_ptr.*);
         }
         
+        // Registering struct field declarations
         for (self.struct_decl_datas.items) |struct_decl_data| {
             self.typeStructDeclFields(struct_decl_data.scope, struct_decl_data.ast, struct_decl_data.typ);
+        }
+        
+        // After registering all the structs (including generic)
+        // then we register generic struct field per generic instance
+        {
+            var iter = self.generic_structs.valueIterator();
+            
+            while (iter.next()) |typ| {
+                typ.*.fillGenericStruct(self.type_manager);
+                
+                std.debug.print("type {}\n", .{typ.*.value.@"struct".fields.len});
+            }
         }
         
         for (self.struct_decl_datas.items) |struct_decl_data| {
@@ -548,10 +568,31 @@ const Typer = struct {
         scope.set(struct_symbol.text, struct_symbol, struct_type_container, true, .constant);       
         const new_scope = scope.inheritWithMode(.container, self.arena);
         
+        var type_param_types = std.ArrayList(*Type).initCapacity(self.arena, decl.type_params.len) catch unreachable;
+        var type_param_symbols: []Symbol = &.{};
+        
+        if (decl.type_params.len > 0) {
+            type_param_symbols = self.arena.alloc(Symbol, decl.type_params.len) catch unreachable;
+            
+            for (decl.type_params, 0..) |p, i| {
+                const type_param_name = self.getTokenText(p);
+                const type_param_symbol = self.symbol_manager.createSymbol(p, false);
+                const type_param_typ = self.type_manager.createTypeParam(type_param_symbol, i);
+                
+                new_scope.set(type_param_name, type_param_symbol, type_param_typ, true, .constant);
+                type_param_symbols[i] = type_param_symbol;
+                
+                type_param_types.appendAssumeCapacity(type_param_typ);
+            }
+            
+            struct_type.value.@"struct".type_params = type_param_types.items;
+        }
+        
         return .{
             .ast = decl,
             .typ = struct_type,
             .scope = new_scope,
+            .type_params = type_param_symbols,
         };
     }
     
@@ -1111,7 +1152,7 @@ const Typer = struct {
                 const index = if (i < param_types.len - skip_param) i + skip_param
                 else if (is_variadic) param_types.len - skip_param - 1 else unreachable;
                 
-                const exp_typ = self.type_manager.collapseTypeParam(param_types[index]);
+                const exp_typ = param_types[index].collapseTypeParam(self.type_manager);
                 
                 const expr = self.typeExpr(scope, &arg, exp_typ);
                 typed_args.appendAssumeCapacity(expr);
@@ -1169,10 +1210,10 @@ const Typer = struct {
                         monomorphized_tast.params = self.arena.dupe(tast.FnParam, monomorphized_tast.params) catch unreachable;
                         
                         for (monomorphized_tast.params) |*param| {
-                            param.typ = self.type_manager.collapseTypeParam(param.typ);
+                            param.typ = param.typ.collapseTypeParam(self.type_manager);
                         }
                         
-                        monomorphized_tast.return_typ = self.type_manager.collapseTypeParam(monomorphized_tast.return_typ);
+                        monomorphized_tast.return_typ = monomorphized_tast.return_typ.collapseTypeParam(self.type_manager);
                         
                         self.typeFnDeclBody(fn_decl_data.scope.inherit(), fn_decl_data.ast, &monomorphized_tast);
                         
@@ -2595,6 +2636,8 @@ const Typer = struct {
             typ = exp_typ;
         }
         
+        var struct_typ: types.TypeStruct = undefined;
+        
         if (typ.value == .reference and typ.value.reference.child.value == .@"struct") {
             self.reporter.reportErrorAtSpan(
                 span,
@@ -2605,7 +2648,13 @@ const Typer = struct {
                 }
             );
         }
-        else if (typ.value != .@"struct") {
+        else if (typ.value == .@"struct") {
+            struct_typ = typ.value.@"struct";
+        }
+        else if (typ.value == .generic and typ.value.generic.base.value == .@"struct") {
+            struct_typ = typ.value.generic.base.value.@"struct";
+        }
+        else {
             self.reporter.reportErrorAtSpan(span, "Expected type `{s}` but got a struct", .{typ.getTextLeak(self.arena)});
         }
         
@@ -2615,7 +2664,6 @@ const Typer = struct {
             has_default,
         };
         
-        const struct_typ = typ.value.@"struct";
         const field_len = struct_typ.fields.len;
         var field_states = self.temp_allocator.alloc(FieldState, field_len) catch unreachable;
         defer self.temp_allocator.free(field_states);
@@ -2832,6 +2880,51 @@ const Typer = struct {
                     }
                 }
             },
+            ast.TypeKind.generic => {
+                var children = std.ArrayList(*const Type).initCapacity(self.arena, typ.value.generic.children.len) catch unreachable;
+                
+                for (typ.value.generic.children) |child| {
+                    children.appendAssumeCapacity(self.typeType(scope, &child));
+                }
+                
+                const base_text = self.getTokenText(typ.value.generic.base);
+                
+                if (scope.get(base_text)) |sym| {
+                    switch (sym.typ.kind) {
+                        .typ => {
+                            if (sym.typ.value.typ.child.kind == .@"struct") {
+                                if (typ.value.generic.children.len != sym.typ.value.typ.child.value.@"struct".type_params.len) {
+                                    self.reporter.reportErrorAtToken(
+                                        typ.value.generic.base,
+                                        "Expected {} generic parameter, but got {}",
+                                        .{
+                                            sym.typ.value.typ.child.value.@"struct".type_params.len,
+                                            typ.value.generic.children.len,
+                                        }
+                                    );
+                                }
+                                
+                                const generic_typ = self.type_manager.createGenericStruct(sym.typ.value.typ.child, children.items);
+                                self.generic_structs.put(generic_typ.type_id, generic_typ) catch unreachable;
+                                
+                                return generic_typ;
+                            }
+                            else {
+                                self.reporter.reportErrorAtToken(typ.value.generic.base, "type `{s}` is not generic", .{base_text});
+                            }
+                        },
+                        .type_param => {
+                            std.debug.panic("TODO: typeType nested generic", .{});
+                        },
+                        else => {
+                            self.reporter.reportErrorAtToken(typ.value.simple.name, "`{s}` is not a type", .{base_text});
+                        },
+                    }
+                }
+                else {
+                    self.reporter.reportErrorAtToken(typ.value.simple.name, "Unknown type `{s}`", .{base_text});
+                }
+            },
             ast.TypeKind.array => {
                 return self.type_manager.createArray(
                     self.typeType(scope, typ.value.array.child),
@@ -2842,6 +2935,11 @@ const Typer = struct {
             ast.TypeKind.reference => {
                 return self.type_manager.createReference(
                     self.typeType(scope, typ.value.reference.child)
+                );
+            },
+            ast.TypeKind.pointer => {
+                return self.type_manager.createPointer(
+                    self.typeType(scope, typ.value.pointer.child)
                 );
             },
             ast.TypeKind.inline_struct => {

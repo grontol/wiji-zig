@@ -780,6 +780,11 @@ const Cgen = struct {
                 self.write("*");
                 return;
             },
+            .pointer => {
+                self.genType(typ.value.pointer.child);
+                self.write("*");
+                return;
+            },
             .voidptr => {
                 self.write("void*");
                 return;
