@@ -384,7 +384,11 @@ pub const Type = struct {
     }
     
     pub fn isSame(self: *const Type, other: *const Type) bool {
-        if (self.type_id == other.type_id) return true;
+        return self.isSameInternal(other, false);
+    }
+    
+    fn isSameInternal(self: *const Type, other: *const Type, ignore_type_id: bool) bool {
+        if (!ignore_type_id and self.type_id == other.type_id) return true;
         if (self.kind != other.kind) return false;
         
         switch (self.value) {
@@ -490,6 +494,21 @@ pub const Type = struct {
                 return self;
             },
             .@"struct" => {
+                if (self.value.@"struct".type_params.len > 0) {
+                    var all_resolved = true;
+                    
+                    for (self.value.@"struct".type_params) |p| {
+                        if (p.value.type_param.resolved_typ == null) {
+                            all_resolved = false;
+                            break;
+                        }
+                    }
+                    
+                    if (all_resolved) {
+                        
+                    }
+                }
+                
                 return self;
             },
             .reference => {                
@@ -926,7 +945,9 @@ pub const TypeManager = struct {
         std.debug.assert(base.value == .@"struct");
         
         var h = base.hash;
-        for (children) |child| { h = combineHash(h, child.hash); }
+        for (children) |child| {
+            h = combineHash(h, child.hash);
+        }
         
         const typ = Type{
             .kind = .@"struct",
@@ -934,9 +955,6 @@ pub const TypeManager = struct {
             .alignment = 0,
             .type_id = self.cur_index,
             .hash = h,
-            // No need to fill details here
-            // Details will be filled later if generic type is not already saved
-            // Only `hash` field is checked for retrieving saved type
             .value = .{.@"struct" = .{
                 .generic_base = base,
                 .name = base.value.@"struct".name,
@@ -1023,7 +1041,7 @@ fn TypeHashMap() type {
         }
         
         pub fn eql(_: @This(), a: Type, b: Type) bool {
-            return a.isSame(&b);
+            return a.isSameInternal(&b, true);
         }
     };
     

@@ -1,0 +1,26 @@
+import "std.wj"
+import "raylib.wj"
+
+const SCREEN_WIDTH  = 1280
+const SCREEN_HEIGHT = 720
+
+fn main() {
+    setTargetFPS(60)
+    initWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "My Piano")
+    
+    while !windowShouldClose() {        
+        beginDrawing()
+        clearBackground(GRAY)
+        
+        renderPiano()
+        
+        drawFPS(20, 20)
+        endDrawing()
+    }
+    
+    closeWindow()
+}
+
+fn renderPiano() {
+    
+}

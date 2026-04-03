@@ -75,7 +75,6 @@ fn main() {
 }
 
 fn spawnBullet(x: f32, y: f32) {
-    // bullets.append(Bullet.new(x, y))
     daAppend(&bullets, Bullet.new(x, y))
 }
 
@@ -83,7 +82,6 @@ fn spawnEnemy() {
     const x = rand() % SCREEN_WIDTH
     const y = rand() % SCREEN_HEIGHT / 2
     
-    // enemies.append(Enemy.new(.green))
     daAppend(&enemies, Enemy.new(.green))
 }
 
@@ -276,3 +274,9 @@ fn daAppend<T>(arr: &[dyn]T, value: T) {
     arr[arr.len] = value
     arr.len += 1
 }
+
+// extern fn printf(fmt: string, ...args: any)
+// extern fn malloc(size: usize): voidptr
+// extern fn realloc(ptr: voidptr, size: usize): voidptr
+// extern fn memcpy(dest: voidptr, src: voidptr, n: usize)
+// extern pub fn rand(): i32

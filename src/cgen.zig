@@ -619,14 +619,18 @@ const Cgen = struct {
     fn genArrayIndex(self: *Cgen, arr: *const tast.ArrayIndex) void {
         self.genExpr(arr.callee);
         
-        if (arr.is_reference) {
-            self.write("->");
-        }
-        else {
-            self.write(".");
+        if (!arr.is_raw_pointer) {
+            if (arr.is_reference) {
+                self.write("->");
+            }
+            else {
+                self.write(".");
+            }
+            
+            self.write("ptr");
         }
         
-        self.write("ptr[");
+        self.write("[");
         self.genExpr(arr.index);
         self.write("]");
     }

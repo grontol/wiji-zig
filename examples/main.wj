@@ -1,47 +1,24 @@
-struct Point {
-    x: i32
-    y: i32
-    
-    fn print(self: Point) {
-        printf("x = %d, y = %d\n", self.x, self.y)
-    }
-}
+import "std.wj"
 
 fn main() {
-    val xs: [dyn]i32 = .[]
-    val ys: [dyn]string = .[]
-    val points: [dyn]Point = .[]
-    
     const al: ArrayList<i32> = .{
-        ptr = 0 as voidptr,
+        items = 0 as voidptr,
         len = 0,
         cap = 0,
     }
     
-    dynArrayAppend(&al, 4)
+    dynArrayAppend(&al, 1)
+    // dynArrayAppend(&al, 2)
+    // dynArrayAppend(&al, 3)
+    // dynArrayAppend(&al, 4)
     
-    // dynArrayAppend(&xs, 4)
-    // dynArrayAppend(&ys, "Satu")
-    // dynArrayAppend(&ys, "Dua")
-    // dynArrayAppend(&ys, "Tiga")
-    // dynArrayAppend(&points, .{10, 20})
-    // dynArrayAppend(&points, .{50, 60})
-    
-    for x in xs {
-        printf("%d\n", x)
-    }
-    
-    for y in ys {
-        printf("%s\n", y)
-    }
-    
-    for p in points {
-        p.print()
+    for i in 0..al.len {
+        printf("%d = %d\n", i, al.items[i])
     }
 }
 
 struct ArrayList<T> {
-    ptr: *T
+    items: *T
     len: usize
     cap: usize
     
@@ -60,21 +37,16 @@ fn dynArrayAppend<T>(arr: &ArrayList<T>, value: T) {
         var newPtr: voidptr
         if arr.cap == 0 {
             newPtr = malloc(newCap * @sizeOf(T))
-            memcpy(arr.ptr, newPtr, arr.len * @sizeOf(T))
+            memcpy(arr.items, newPtr, arr.len * @sizeOf(T))
         }
         else {
-            newPtr = realloc(arr.ptr, newCap * @sizeOf(T))
+            newPtr = realloc(arr.items, newCap * @sizeOf(T))
         }
         
-        arr.ptr = newPtr
+        arr.items = newPtr
         arr.cap = newCap
     }
     
-    arr[arr.len] = value
+    arr.items[arr.len] = value
     arr.len += 1
 }
-
-extern fn printf(fmt: string, ...args: any)
-extern fn malloc(size: usize): voidptr
-extern fn realloc(ptr: voidptr, size: usize): voidptr
-extern fn memcpy(dest: voidptr, src: voidptr, n: usize)

@@ -169,6 +169,7 @@ pub const ArrayIndex = struct {
     callee: *Expr,
     index: *Expr,
     is_reference: bool,
+    is_raw_pointer: bool,
 };
 
 pub const StructValue = struct {
