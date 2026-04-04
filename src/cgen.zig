@@ -136,7 +136,6 @@ const Cgen = struct {
         
         self.setToHeader();
         self.write("#include <stdio.h>\n");
-        self.write("#include <stdlib.h>\n");
         self.write("#include <stdint.h>\n");
         self.write("#include <stdbool.h>\n");
         
@@ -839,7 +838,8 @@ const Cgen = struct {
                 },
                 
                 .@"struct" => {
-                    const struct_name = typ.value.@"struct".name.text;
+                    var struct_name = typ.value.@"struct".name.text;
+                    
                     var temp = std.ArrayList(u8).empty;
                     defer temp.clearAndFree(self.allocator);
                     
@@ -853,11 +853,23 @@ const Cgen = struct {
                         self.writeArgs(" {s}; ", .{field.name.text});
                     }
                     
-                    self.writeArgs("}} {s};\n", .{struct_name});
+                    self.writeArgs("}} {s}", .{struct_name});
+                    
+                    if (typ.value.@"struct".type_params.len > 0) {
+                        self.writeArgs("_{}", .{typ.type_id});
+                    }
+                    
+                    self.writeArgs(";\n", .{});
                     
                     self.setToTypedef();
                     self.writeArgs("{s}", .{temp.items});
                     self.cur_src = last_src;
+                    
+                    if (typ.value.@"struct".type_params.len > 0) {
+                        var struct_name_ar = std.ArrayList(u8).empty;
+                        struct_name_ar.print(self.allocator, "{s}_{}", .{struct_name, typ.type_id}) catch unreachable;
+                        struct_name = struct_name_ar.items;
+                    }
                     
                     self.type_map.put(typ.type_id, struct_name) catch unreachable;
                     

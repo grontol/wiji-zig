@@ -423,7 +423,20 @@ pub const Type = struct {
             TypeKind.pointer => {
                 return self.value.pointer.child.isSame(other.value.pointer.child);
             },
-            TypeKind.@"struct" => return false,
+            TypeKind.@"struct" => {
+                if (self.value.@"struct".generic_base != null and other.value.@"struct".generic_base != null) {                    
+                    if (self.value.@"struct".generic_base.?.type_id != other.value.@"struct".generic_base.?.type_id) return false;
+                    if (self.value.@"struct".type_params.len != other.value.@"struct".type_params.len) return false;
+                    
+                    for (0..self.value.@"struct".type_params.len) |i| {
+                        if (!self.value.@"struct".type_params[i].isSame(other.value.@"struct".type_params[i])) return false;
+                    }
+                    
+                    return true;
+                }
+                
+                return false;
+            },
             TypeKind.type_param => return self.type_id == other.type_id,
             TypeKind.typ => {
                 return self.value.typ.child.isSame(other.value.typ.child);
@@ -494,18 +507,34 @@ pub const Type = struct {
                 return self;
             },
             .@"struct" => {
-                if (self.value.@"struct".type_params.len > 0) {
+                if (self.value.@"struct".generic_base != null and self.value.@"struct".type_params.len > 0) {
                     var all_resolved = true;
+                    var already_collapsed = true;
                     
                     for (self.value.@"struct".type_params) |p| {
-                        if (p.value.type_param.resolved_typ == null) {
-                            all_resolved = false;
-                            break;
-                        }
+                        if (p.kind == .type_param) {
+                            already_collapsed = false;
+                            
+                            if (p.value.type_param.resolved_typ == null) {
+                                all_resolved = false;
+                                break;
+                            }
+                        }                        
                     }
                     
                     if (all_resolved) {
+                        const type_params: []const *const Type = if (already_collapsed) self.value.@"struct".type_params else blk: {
+                            // MEMORY: Masak allocate terus
+                            var type_params = type_manager.arena.alloc(*const Type, self.value.@"struct".type_params.len) catch unreachable;
+                            
+                            for (0..type_params.len) |i| {
+                                type_params[i] = self.value.@"struct".type_params[i].collapseTypeParam(type_manager);
+                            }
+                            
+                            break :blk type_params;
+                        };
                         
+                        return type_manager.createGenericStruct(self.value.@"struct".generic_base.?, type_params);
                     }
                 }
                 
@@ -958,8 +987,8 @@ pub const TypeManager = struct {
             .value = .{.@"struct" = .{
                 .generic_base = base,
                 .name = base.value.@"struct".name,
-                .field_map = .init(self.arena),
-                .method_map = .init(self.arena),
+                .field_map = base.value.@"struct".field_map,
+                .method_map = base.value.@"struct".method_map,
                 .type_params = children,
                 .fields = &.{},
                 .methods = &.{},

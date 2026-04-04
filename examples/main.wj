@@ -8,9 +8,8 @@ fn main() {
     }
     
     dynArrayAppend(&al, 1)
-    // dynArrayAppend(&al, 2)
-    // dynArrayAppend(&al, 3)
-    // dynArrayAppend(&al, 4)
+    dynArrayAppend(&al, 12)
+    dynArrayAppend(&al, 123)
     
     for i in 0..al.len {
         printf("%d = %d\n", i, al.items[i])
@@ -21,10 +20,6 @@ struct ArrayList<T> {
     items: *T
     len: usize
     cap: usize
-    
-    // fn foo(self: &@Self) {
-    //     printf("ptr = %d", self.ptr)
-    // }
 }
 
 fn dynArrayAppend<T>(arr: &ArrayList<T>, value: T) {

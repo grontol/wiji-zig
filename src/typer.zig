@@ -1140,7 +1140,6 @@ const Typer = struct {
         
         // Generic function
         if (callee.typ.value.func.type_params.len > 0) {
-            std.debug.print("Calling generic fn\n", .{});
             const type_params = callee.typ.value.func.type_params;
             
             // Reset type_params for current function call
