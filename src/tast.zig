@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("type.zig");
 const Symbol = @import("symbol.zig").Symbol;
+const Scope = @import("scope.zig").Scope;
 const TypedSymbol = @import("symbol.zig").TypedSymbol;
 const Mutability = @import("symbol.zig").Mutability;
 const Type = types.Type;
@@ -11,6 +12,7 @@ pub const Module = struct {
     fn_decls: []const FnDecl,
     
     public_symbols: std.StringHashMap(TypedSymbol),
+    public_child_scopes: std.StringHashMap(*Scope),
     children: []const *Module,
 };
 

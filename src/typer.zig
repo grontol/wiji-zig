@@ -217,6 +217,15 @@ const Typer = struct {
             }
         }
         
+        var public_child_scopes = std.StringHashMap(*Scope).init(self.arena);
+        {
+            var iter = scope.child_scopes.iterator();
+            
+            while (iter.next()) |entry| {
+                public_child_scopes.put(entry.key_ptr.*, entry.value_ptr.*) catch unreachable;
+            }
+        }
+        
         self.var_decl_datas.deinit(self.temp_allocator);
         self.fn_decl_datas.deinit(self.temp_allocator);
         self.struct_decl_datas.deinit(self.temp_allocator);
@@ -227,6 +236,7 @@ const Typer = struct {
             .var_decls = self.collectAndFreeTempList(tast.VarDecl, &var_decls),
             .fn_decls = self.collectAndFreeTempList(tast.FnDecl, &self.fn_decls),
             .public_symbols = public_symbols,
+            .public_child_scopes = public_child_scopes,
             .children = children.items,
         };
     }
@@ -342,8 +352,8 @@ const Typer = struct {
             self.reporter.reportErrorAtToken(fn_decl.name, "Symbol `{s}` is already defined", .{fn_name});
         }
         
-        var params = std.ArrayList(tast.FnParam).initCapacity(self.arena, fn_decl.params.len) catch unreachable;
-        var param_types = std.ArrayList(*const Type).initCapacity(self.arena, fn_decl.params.len) catch unreachable;
+        var tast_params = std.ArrayList(tast.FnParam).initCapacity(self.arena, fn_decl.params.len) catch unreachable;
+        var params = std.ArrayList(types.TypeFuncParam).initCapacity(self.arena, fn_decl.params.len) catch unreachable;
         var type_param_types = std.ArrayList(*Type).initCapacity(self.arena, fn_decl.type_params.len) catch unreachable;
         var has_default = false;
         var is_variadic = false;
@@ -418,14 +428,17 @@ const Typer = struct {
             
             const symbol = self.symbol_manager.createSymbol(param.name, false);
             
-            params.appendAssumeCapacity(tast.FnParam{
+            tast_params.appendAssumeCapacity(tast.FnParam{
                 .name = symbol,
                 .default_value = param_default_value,
                 .typ = param_typ,
                 .is_variadic = is_variadic,
             });
             
-            param_types.appendAssumeCapacity(param_typ);
+            params.appendAssumeCapacity(.{
+                .typ = param_typ,
+                .default_value = param_default_value,
+            });
         }
         
         if (fn_decl.return_typ) |typ| {
@@ -436,7 +449,7 @@ const Typer = struct {
         const fn_name_symbol = self.symbol_manager.createSymbol(fn_decl.name, namespaced);
         const fn_typ = self.type_manager.createFn(
             fn_name_symbol,
-            param_types.items,
+            params.items,
             type_param_types.items,
             return_typ,
             is_variadic,
@@ -453,7 +466,7 @@ const Typer = struct {
             .is_public = fn_decl.is_public,
             .name = fn_name_symbol,
             .return_typ = return_typ,
-            .params = params.items,
+            .params = tast_params.items,
             .type_params = type_param_symbols,
             .body = null,
         };
@@ -667,7 +680,7 @@ const Typer = struct {
                 .fn_decl => {
                     const fn_decl_data = self.typeFnDeclForward(scope, &decl.members[i].value.fn_decl, decl.members[i].span);
                     
-                    if (fn_decl_data.typ.value.func.params.len > 0 and fn_decl_data.typ.value.func.params[0].isSameOrSameReference(struct_typ)) {
+                    if (fn_decl_data.typ.value.func.params.len > 0 and fn_decl_data.typ.value.func.params[0].typ.isSameOrSameReference(struct_typ)) {
                         methods.append(self.temp_allocator, .{
                             .name = fn_decl_data.tast.name,
                             .typ = fn_decl_data.typ,
@@ -757,7 +770,7 @@ const Typer = struct {
                 .fn_decl => {
                     const fn_decl_data = self.typeFnDeclForward(scope, &decl.members[i].value.fn_decl, decl.members[i].span);
                     
-                    if (fn_decl_data.typ.value.func.params.len > 0 and fn_decl_data.typ.value.func.params[0].isSameOrSameReference(enum_typ)) {
+                    if (fn_decl_data.typ.value.func.params.len > 0 and fn_decl_data.typ.value.func.params[0].typ.isSameOrSameReference(enum_typ)) {
                         methods.append(self.temp_allocator, .{
                             .name = fn_decl_data.tast.name,
                             .typ = fn_decl_data.typ,
@@ -1124,30 +1137,57 @@ const Typer = struct {
         }
         
         const is_variadic = callee.typ.value.func.is_variadic;
-        const param_types = callee.typ.value.func.params;
+        const params = callee.typ.value.func.params;
         const return_type = callee.typ.value.func.returns;
         const skip_param: usize = if (callee.value == .struct_method or callee.value == .enum_method) 1 else 0;
+        var default_param_count: usize = 0;
+        
+        for (params) |param| {
+            if (param.default_value) |_| {
+                default_param_count += 1;
+            }
+        }
         
         if (is_variadic) {
-            if (call.args.len < param_types.len - skip_param - 1) {
+            // TODO: Variadic function with default value?
+            if (call.args.len < params.len - skip_param - default_param_count - 1) {
                 self.reporter.reportErrorAtSpan(
                     span,
                     "Expected {} or more arguments but got {}",
-                    .{ param_types.len - skip_param - 1, call.args.len },
+                    .{ params.len - skip_param - 1, call.args.len },
                 );
             }
         }
         else {
-            if (call.args.len != param_types.len - skip_param) {
-                self.reporter.reportErrorAtSpan(
-                    span,
-                    "Expected {} arguments but got {}",
-                    .{ param_types.len - skip_param, call.args.len },
-                );
+            if (default_param_count == 0) {
+                if (call.args.len != params.len - skip_param) {
+                    self.reporter.reportErrorAtSpan(
+                        span,
+                        "Expected {} arguments but got {}",
+                        .{ params.len - skip_param, call.args.len },
+                    );
+                }
+            }
+            else {
+                if (call.args.len < params.len - skip_param - default_param_count) {
+                    self.reporter.reportErrorAtSpan(
+                        span,
+                        "Expected {} or more arguments but got {}",
+                        .{ params.len - skip_param - default_param_count, call.args.len },
+                    );
+                }
+                else if (call.args.len > params.len - skip_param) {
+                    self.reporter.reportErrorAtSpan(
+                        span,
+                        "Expected {} or more arguments and no more than {} arguments but got {}",
+                        .{ params.len - skip_param - default_param_count, params.len - skip_param, call.args.len },
+                    );
+                }
             }
         }
         
-        var typed_args = std.ArrayList(tast.Expr).initCapacity(self.arena, call.args.len) catch unreachable;
+        const param_len = if (call.args.len > params.len) call.args.len else params.len - skip_param;
+        var typed_args = std.ArrayList(tast.Expr).initCapacity(self.arena, param_len) catch unreachable;
         
         // Generic function
         if (callee.typ.value.func.type_params.len > 0) {
@@ -1159,20 +1199,20 @@ const Typer = struct {
             }
             
             for (call.args, 0..) |arg, i| {
-                const index = if (i < param_types.len - skip_param) i + skip_param
-                else if (is_variadic) param_types.len - skip_param - 1 else unreachable;
+                const index = if (i < params.len - skip_param) i + skip_param
+                else if (is_variadic) params.len - skip_param - 1 else unreachable;
                 
-                const exp_typ = param_types[index].collapseTypeParam(self.type_manager);
+                const exp_typ = params[index].typ.collapseTypeParam(self.type_manager);
                 
                 const expr = self.typeExpr(scope, &arg, exp_typ);
                 typed_args.appendAssumeCapacity(expr);
                 
-                if (!expr.typ.canBeAssignedToOrResolveGeneric(param_types[index], self.type_manager)) {
+                if (!expr.typ.canBeAssignedToOrResolveGeneric(params[index].typ, self.type_manager)) {
                     self.reporter.reportErrorAtSpan(
                         arg.span,
                         "Expected type `{s}` but got `{s}`",
                         .{
-                            param_types[index].getTextLeak(self.arena),
+                            params[index].typ.getTextLeak(self.arena),
                             expr.typ.getTextLeak(self.arena),
                         },
                     );
@@ -1246,21 +1286,27 @@ const Typer = struct {
         }
         else {
             for (call.args, 0..) |arg, i| {
-                const index = if (i < param_types.len - skip_param) i + skip_param
-                else if (is_variadic) param_types.len - skip_param - 1 else unreachable;
+                const index = if (i < params.len - skip_param) i + skip_param
+                else if (is_variadic) params.len - skip_param - 1 else unreachable;
                 
-                const expr = self.typeExpr(scope, &arg, param_types[index]);
+                const expr = self.typeExpr(scope, &arg, params[index].typ);
                 typed_args.appendAssumeCapacity(expr);
                 
-                if (!expr.typ.canBeAssignedTo(param_types[index])) {
+                if (!expr.typ.canBeAssignedTo(params[index].typ)) {
                     self.reporter.reportErrorAtSpan(
                         arg.span,
                         "Expected type `{s}` but got `{s}`",
                         .{
-                            param_types[index].getTextLeak(self.arena),
+                            params[index].typ.getTextLeak(self.arena),
                             expr.typ.getTextLeak(self.arena),
                         },
                     );
+                }
+            }
+            
+            for (call.args.len..param_len) |i| {
+                if (params[i + skip_param].default_value) |def_val| {
+                    typed_args.appendAssumeCapacity(@as(*tast.Expr, @alignCast(@ptrCast(def_val))).*);
                 }
             }
         }
@@ -1548,11 +1594,21 @@ const Typer = struct {
         const path = path_with_quote[1..path_with_quote.len - 1];
         const module = self.children.get(path);
         
-        if (module) |mod| {            
-            var iter = mod.public_symbols.iterator();
+        if (module) |mod| {
+            {
+                var iter = mod.public_symbols.iterator();
+                
+                while (iter.next()) |entry| {
+                    scope.setTypedSymbol(entry.key_ptr.*, entry.value_ptr.*);
+                }
+            }
             
-            while (iter.next()) |entry| {
-                scope.setTypedSymbol(entry.key_ptr.*, entry.value_ptr.*);
+            {
+                var iter = mod.public_child_scopes.iterator();
+                
+                while (iter.next()) |entry| {
+                    scope.setChildScope(entry.key_ptr.*, entry.value_ptr.*);
+                }
             }
         }
         else {
@@ -2372,7 +2428,7 @@ const Typer = struct {
                     const method = struct_typ.methods[index];
                     var actual_callee = allocateCallee(typer, callee_, should_allocate);
                         
-                    if (method.typ.value.func.params[0].value == .reference) {
+                    if (method.typ.value.func.params[0].typ.value == .reference) {
                         if (callee_.typ.value == .@"struct") {
                             const reference_typ = typer.type_manager.createReference(callee_.typ);
                             
@@ -2389,7 +2445,7 @@ const Typer = struct {
                         }
                     }
                     else if (callee_.typ.value == .reference) {
-                        if (method.typ.value.func.params[0].value == .@"struct") {
+                        if (method.typ.value.func.params[0].typ.value == .@"struct") {
                             actual_callee = typer.makeExprPointer(.{
                                 .value = .{
                                     .dereferenc_of = .{
@@ -2535,7 +2591,7 @@ const Typer = struct {
             if (std.mem.eql(u8, method.name.text, member_text)) {
                 var actual_callee = callee;
                 
-                if (method.typ.value.func.params[0].value == .reference) {
+                if (method.typ.value.func.params[0].typ.value == .reference) {
                     if (callee.typ.value == .@"struct") {
                         const reference_typ = self.type_manager.createReference(callee.typ);
                         
@@ -2552,7 +2608,7 @@ const Typer = struct {
                     }
                 }
                 else if (callee.typ.value == .reference) {
-                    if (method.typ.value.func.params[0].value == .@"struct") {
+                    if (method.typ.value.func.params[0].typ.value == .@"struct") {
                         actual_callee = self.makeExprPointer(.{
                             .value = .{
                                 .dereferenc_of = .{
@@ -2622,11 +2678,11 @@ const Typer = struct {
         }
         else if (ar_typ.is_dyn) {
             if (std.mem.eql(u8, member_text, "append")) {
-                const param_types = self.arena.alloc(*const Type, 1) catch unreachable;
-                param_types[0] = ar_typ.child;
+                const params = self.arena.alloc(types.TypeFuncParam, 1) catch unreachable;
+                params[0] = .{ .typ = ar_typ.child, .default_value = null };
                 
                 return .{
-                    .typ = self.type_manager.createFn(null, param_types, &.{}, types.VOID, false, true, false),
+                    .typ = self.type_manager.createFn(null, params, &.{}, types.VOID, false, true, false),
                     .mutability = .constant,
                     .value = .{ .builtin = .{ .dynarray_append = .{ .arr = ar, .is_reference = is_reference } } }
                 };

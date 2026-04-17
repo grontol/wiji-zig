@@ -1,0 +1,25 @@
+/*
+Kalau default value berasal dari struct const, type-nya masih unknown
+*/
+
+import "../std.wj"
+
+fn main() {
+    const p = Point.new(50)
+    p.print()
+}
+
+struct Point {
+    const DEF = 40
+    
+    x: i32
+    y: i32
+    
+    fn new(x = 10, y = DEF): @Self {
+        return .{ x, y }
+    }
+    
+    fn print(self: @Self) {
+        printf("x = %d, y = %d\n", self.x, self.y)
+    }
+}

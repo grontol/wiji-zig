@@ -1,0 +1,52 @@
+import "std.wj"
+
+fn main() {
+    const al = ArrayList<i32>.new()
+    // var al: ArrayList<i32>
+    
+    // dynArrayAppend(&al, 1)
+    // dynArrayAppend(&al, 12)
+    // dynArrayAppend(&al, 123)
+    
+    // for i in 0..al.len {
+    //     printf("%d = %d\n", i, al.items[i])
+    // }
+}
+
+struct ArrayList<T> {
+    items: *T
+    len: usize
+    cap: usize
+    
+    fn new(): ArrayList<i32> {
+        return .{
+            items = 0 as voidptr,
+            len = 0,
+            cap = 0,
+        }
+    }
+}
+
+// fn dynArrayAppend<T>(arr: &ArrayList<T>, value: T) {
+//     if arr.len + 1 > arr.cap {
+//         var newCap: usize
+        
+//         if arr.cap == 0 newCap = 16
+//         else newCap = arr.cap * 2
+        
+//         var newPtr: voidptr
+//         if arr.cap == 0 {
+//             newPtr = malloc(newCap * @sizeOf(T))
+//             memcpy(arr.items, newPtr, arr.len * @sizeOf(T))
+//         }
+//         else {
+//             newPtr = realloc(arr.items, newCap * @sizeOf(T))
+//         }
+        
+//         arr.items = newPtr
+//         arr.cap = newCap
+//     }
+    
+//     arr.items[arr.len] = value
+//     arr.len += 1
+// }

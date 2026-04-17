@@ -68,9 +68,14 @@ pub const TypeKind = enum {
     voidptr,
 };
 
+pub const TypeFuncParam = struct {
+    typ: *const Type,
+    default_value: ?*anyopaque,
+};
+
 pub const TypeFunc = struct {
     name: ?Symbol,
-    params: []const *const Type,
+    params: []const TypeFuncParam,
     type_params: []const *Type,
     returns: *const Type,
     is_variadic: bool,
@@ -238,6 +243,7 @@ pub const Type = struct {
         if (self.isSame(other)) return true;
         if (self.kind == .voidptr and other.kind == .pointer or self.kind == .pointer and other.kind == .voidptr) return true;
         if (self.kind == .numeric and self.value.numeric.isInt() and self.value.numeric.isUntyped() and other.kind == .char) return true;
+        if (self.kind == .string and other.kind == .pointer and other.value.pointer.child.kind == .char) return true;
         if (self.kind != other.kind) return false;
         
         switch (self.kind) {
@@ -428,7 +434,7 @@ pub const Type = struct {
                 if (self.value.func.params.len != other.value.func.params.len) return false;
                 
                 for (0..self.value.func.params.len) |i| {
-                    if (!self.value.func.params[i].isSame(other.value.func.params[i])) return false;
+                    if (!self.value.func.params[i].typ.isSame(other.value.func.params[i].typ)) return false;
                 }
                 
                 return true;
@@ -675,7 +681,7 @@ pub const Type = struct {
                         out.appendSlice(allocator, "...") catch unreachable;
                     }
                     
-                    param.getText(out, allocator);
+                    param.typ.getText(out, allocator);
                 }
                 
                 out.appendSlice(allocator, "): ") catch unreachable;
@@ -892,7 +898,7 @@ pub const TypeManager = struct {
     pub fn createFn(
         self: *TypeManager,
         name: ?Symbol,
-        params: []const *const Type,
+        params: []const TypeFuncParam,
         type_params: []const *Type,
         return_typ: *const Type,
         is_variadic: bool,
@@ -900,7 +906,7 @@ pub const TypeManager = struct {
         is_generic: bool,
     ) *Type {
         var h = combineHash(@intFromEnum(TypeKind.func), params.len);
-        for (params) |param| { h = combineHash(h, param.hash); }
+        for (params) |param| { h = combineHash(h, param.typ.hash); }
         h = combineHash(h, if (is_variadic) 1 else 0);
         h = combineHash(h, return_typ.hash);
         
