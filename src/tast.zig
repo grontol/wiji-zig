@@ -55,6 +55,7 @@ pub const FnParam = struct {
     name: Symbol,
     default_value: ?*Expr,
     typ: *const Type,
+    is_variadic: bool,
 };
 
 pub const FnDecl = struct {
@@ -238,6 +239,7 @@ pub const BuiltinKind = enum {
     array_ptr,
     dynarray_cap,
     dynarray_append,
+    dynarray_to_array,
 };
 
 pub const Builtin = union(BuiltinKind) {
@@ -256,6 +258,11 @@ pub const Builtin = union(BuiltinKind) {
     dynarray_append: struct {
         arr: *Expr,
         is_reference: bool,
+    },
+    dynarray_to_array: struct {
+        arr: *Expr,
+        is_reference: bool,
+        dest_typ: *const Type,
     },
 };
 
@@ -336,6 +343,7 @@ pub const ExprKind = enum {
     string_concat,
     builtin,
     invalid,
+    typ,
 };
 
 pub const Expr = struct {
@@ -361,6 +369,7 @@ pub const Expr = struct {
         string_concat: StringConcat,
         builtin: Builtin,
         invalid,
+        typ: *const Type,
     },
     typ: *const Type,
     comptime_known: bool = false,

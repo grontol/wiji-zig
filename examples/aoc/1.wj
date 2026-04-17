@@ -1,0 +1,73 @@
+import "../std.wj"
+
+fn main() {
+    // one()
+    two()
+}
+
+fn one() {
+    const x = readEntireFile("examples/aoc/1.txt")
+    const lines = x.split('\n')
+    
+    var dial = 50
+    var count = 0
+    
+    for line in lines {
+        var num = line.substring(1).toInt()
+        num %= 100
+        
+        if line.data[0] == 'L' {
+            dial -= num
+        }
+        else {
+            dial += num
+        }
+        
+        dial = (dial + 100) % 100
+        
+        if dial == 0 {
+            count += 1
+        }
+    }
+    
+    printf("count = %d\n", count)
+}
+
+fn two() {
+    const x = readEntireFile("examples/aoc/1.txt")
+    const lines = x.split('\n')
+    
+    var dial = 50
+    var count = 0
+    
+    for line in lines {
+        var num = line.substring(1).toInt()
+        const rot = num / 100
+        num %= 100
+        
+        count += rot
+        
+        if line.data[0] == 'L' {
+            if dial != 0 && dial - num < 0 {
+                count += 1
+            }
+            
+            dial -= num
+        }
+        else {
+            if dial != 0 && dial + num > 100 {
+                count += 1
+            }
+            
+            dial += num
+        }
+        
+        dial = (dial + 100) % 100
+        
+        if dial == 0 {
+            count += 1
+        }
+    }
+    
+    printf("count = %d\n", count)
+}

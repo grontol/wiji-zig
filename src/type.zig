@@ -237,6 +237,7 @@ pub const Type = struct {
         if (other.value == TypeKind.unknown) return true;
         if (self.isSame(other)) return true;
         if (self.kind == .voidptr and other.kind == .pointer or self.kind == .pointer and other.kind == .voidptr) return true;
+        if (self.kind == .numeric and self.value.numeric.isInt() and self.value.numeric.isUntyped() and other.kind == .char) return true;
         if (self.kind != other.kind) return false;
         
         switch (self.kind) {
@@ -281,6 +282,9 @@ pub const Type = struct {
             TypeKind.@"struct" => { return false; },
             TypeKind.reference => {
                 return self.value.reference.child.canBeAssignedTo(other.value.reference.child);
+            },
+            TypeKind.pointer => {
+                return self.value.pointer.child.canBeAssignedTo(other.value.pointer.child);
             },
             
             else => {
@@ -379,8 +383,20 @@ pub const Type = struct {
     }
     
     pub fn canBeCastTo(self: *const Type, other: *const Type) bool {
-        return (self.kind == .numeric or self.kind == .voidptr)
-            and (other.kind == .numeric or other.kind == .voidptr);
+        if ((self.kind == .numeric or self.kind == .voidptr)
+            and (other.kind == .numeric or other.kind == .voidptr)) return true;
+        
+        if (self.kind == .char and other.kind == .numeric and other.value.numeric.isInt()) return true;
+        
+        if (self.kind == .pointer and self.value.pointer.child.kind == .numeric
+            and self.value.pointer.child.value.numeric == .u8
+            and other.kind == .string) return true;
+        
+        if (self.kind == .array and self.value.array.is_dyn
+            and other.kind == .array
+            and self.value.array.child.isSame(other.value.array.child)) return true;
+        
+        return false;
     }
     
     pub fn isSame(self: *const Type, other: *const Type) bool {

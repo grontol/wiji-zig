@@ -135,9 +135,10 @@ const Cgen = struct {
         var src = std.ArrayList(u8).empty;
         
         self.setToHeader();
-        self.write("#include <stdio.h>\n");
+        // self.write("#include <stdio.h>\n");
         self.write("#include <stdint.h>\n");
         self.write("#include <stdbool.h>\n");
+        self.write("#include <stddef.h>\n");
         
         self.setToTypedef();
         self.write("typedef uint8_t  u8;\n");
@@ -193,7 +194,7 @@ const Cgen = struct {
         var should_create_impl = true;
         
         if (fn_decl.is_extern) {
-            should_create_decl = !std.mem.eql(u8, fn_decl.name.text, "printf");
+            // should_create_decl = !std.mem.eql(u8, fn_decl.name.text, "printf");
             should_create_impl = false;
         }
         else {
@@ -220,9 +221,14 @@ const Cgen = struct {
                     self.write(", ");
                 }
                 
-                self.genType(param.typ);
-                self.write(" ");
-                self.writeSymbol(param.name);
+                if (param.is_variadic) {
+                    self.write("...");
+                }
+                else {
+                    self.genType(param.typ);
+                    self.write(" ");
+                    self.writeSymbol(param.name);
+                }
             }
             
             self.write(");\n");
@@ -553,7 +559,12 @@ const Cgen = struct {
             .int    => self.writeArgs("{}", .{lit.int}),
             .float  => self.writeArgs("{}", .{lit.float}),
             .string => self.writeArgs("\"{s}\"", .{lit.string}),
-            .char   => self.writeArgs("'{c}'", .{lit.char}),
+            .char   => {
+                switch (lit.char) {
+                    '\n' => self.write("'\\n'"),
+                    else => self.writeArgs("'{c}'", .{lit.char}),
+                }
+            },
         }
     }
     
@@ -688,6 +699,15 @@ const Cgen = struct {
                 }
                 
                 self.write(")");
+            },
+            .dynarray_to_array => {
+                self.write("((");
+                self.genType(builtin.dynarray_to_array.dest_typ);
+                self.write("){{ .ptr = ");
+                self.genExpr(builtin.dynarray_to_array.arr);
+                self.write(".ptr, .len = ");
+                self.genExpr(builtin.dynarray_to_array.arr);
+                self.write(".len }})");
             },
         }
     }

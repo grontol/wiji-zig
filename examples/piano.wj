@@ -22,5 +22,22 @@ fn main() {
 }
 
 fn renderPiano() {
+    const NOTES = 15
+    const NOTE_SPACING = 4
+    const NOTE_WIDTH = (SCREEN_WIDTH - NOTE_SPACING * (NOTES - 1)) as f32 / NOTES as f32
     
+    for i in NOTES {
+        const x = (i as f32 * (NOTE_WIDTH + NOTE_SPACING as f32)) as i32
+        
+        drawRectangle(x, SCREEN_HEIGHT / 2, NOTE_WIDTH as i32, SCREEN_HEIGHT / 2, WHITE)
+    }
+    
+    for i in NOTES {
+        const x = (i as f32 * (NOTE_WIDTH + NOTE_SPACING as f32)) as i32
+        const hasBlackNote = i % 7 != 2 && i % 7 != 6
+        
+        if hasBlackNote {
+            drawRectangle(x + NOTE_WIDTH as i32 * 3 / 5, SCREEN_HEIGHT / 2, NOTE_SPACING + NOTE_WIDTH as i32 * 4 / 5, SCREEN_HEIGHT * 2 / 7, BLACK)
+        }
+    }
 }

@@ -1,0 +1,78 @@
+import "std.wj"
+import "raylib.wj"
+
+const SCREEN_WIDTH  = 1280
+const SCREEN_HEIGHT = 720
+
+extern fn powf(base: f32, exp: f32): f32
+
+fn main() {
+    setTargetFPS(60)
+    initWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Clicker")
+    
+    initAudioDevice()
+    
+    const duck = loadTexture("examples/bebek.jpg")
+    const sound = loadSound("examples/bebek.mp3")
+    setSoundPitch(sound, 2)
+    
+    val ducks: []Duck = .[
+        .{ key = KEY_A, pitch = 1.0, x = 20 },
+        .{ key = KEY_S, pitch = powf(2, 2.0 / 12), x = 120 },
+        .{ key = KEY_D, pitch = powf(2, 4.0 / 12), x = 220 },
+        .{ key = KEY_F, pitch = powf(2, 5.0 / 12), x = 320 },
+        .{ key = KEY_G, pitch = powf(2, 7.0 / 12), x = 420 },
+        .{ key = KEY_H, pitch = powf(2, 9.0 / 12), x = 520 },
+        .{ key = KEY_J, pitch = powf(2, 11.0 / 12), x = 620 },
+        .{ key = KEY_K, pitch = 2.0, x = 720 },
+    ]
+    
+    while !windowShouldClose() {
+        for &d in ducks {
+            if isKeyPressed(d.key) {
+                d.jumping = true
+                d.speed = -1300
+                
+                setSoundPitch(sound, d.pitch)
+                playSound(sound)
+            }
+            
+            if d.jumping {
+                d.speed += 4000 * getFrameTime()
+            }
+            
+            d.y += d.speed * getFrameTime()
+            
+            if d.y >= 400 {
+                d.y = 400
+                d.jumping = false
+            }
+            
+            if d.y < 0 {
+                d.y = 0
+            }
+        }
+        
+        beginDrawing()
+        clearBackground(GRAY)
+        
+        for d in ducks {
+            drawTexture(duck, d.x, d.y as i32, WHITE)
+        }
+        
+        drawFPS(20, 20)
+        
+        endDrawing()
+    }
+    
+    closeWindow()
+}
+
+struct Duck {
+    key: i32
+    pitch: f32
+    x: i32
+    jumping = false
+    y = 400.0
+    speed = 0.0
+}

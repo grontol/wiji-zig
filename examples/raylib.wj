@@ -45,6 +45,7 @@ pub struct Music {
 pub const RED   = Color.{255, 0, 0, 255}
 pub const WHITE = Color.{255, 255, 255, 255}
 pub const GRAY  = Color.{50, 50, 50, 255}
+pub const BLACK = Color.{0, 0, 0, 255}
 
 pub const PI        = 3.14159265359
 
@@ -190,6 +191,10 @@ extern(name = "SeekMusicStream")       fn seekMusicStream(music: Music, value: f
 extern(name = "SetMusicVolume")        fn setMusicVolume(music: Music, value: f32)
 extern(name = "SetMusicPitch")         fn setMusicPitch(music: Music, value: f32)
 extern(name = "SetMusicPan")           fn setMusicPan(music: Music, value: f32)
+extern(name = "IsSoundPlaying")        fn isSoundPlaying(sound: Sound)
+extern(name = "SetSoundVolume")        fn setSoundVolume(sound: Sound, volume: f32)
+extern(name = "SetSoundPitch")         fn setSoundPitch(sound: Sound, pitch: f32)
+extern(name = "SetSoundPan")           fn setSoundPan(sound: Sound, pan: f32)
 
 extern(name = "SetTraceLogLevel")      fn setTraceLogLevel(level: i32)
 extern(name = "SetWindowState")        fn setWindowState(state: i32)

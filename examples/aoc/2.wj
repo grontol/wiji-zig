@@ -1,0 +1,35 @@
+import "../std.wj"
+
+fn main() {
+    one()
+    // two()
+}
+
+fn one() {
+    const x = readEntireFile("examples/aoc/2.exp.txt")
+    const lines = x.split(',')
+    
+    for line in lines {
+        const r = Range.fromString(line)
+        
+        r.print()
+    }
+}
+
+struct Range {
+    start: i32
+    end: i32
+    
+    fn fromString(str: String): @Self {
+        const parts = str.split('-')
+        
+        return .{
+            start = parts[0].toInt(),
+            end = parts[1].toInt(),
+        }
+    }
+    
+    fn print(self: @Self) {
+        printf("%d - %d\n", self.start, self.end)
+    }
+}

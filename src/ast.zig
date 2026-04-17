@@ -131,6 +131,11 @@ pub const ArrayIndex = struct {
     index: *Expr,
 };
 
+pub const Generic = struct {
+    callee: *Expr,
+    children: []const Type,
+};
+
 pub const Block = struct {
     exprs: []const Expr,
     span: TokenSpan,
@@ -230,6 +235,7 @@ pub const Kind = enum {
     fn_call,
     member_access,
     array_index,
+    generic,
     
     block,
     forr,
@@ -265,6 +271,7 @@ pub const Expr = struct {
         fn_call: FnCall,
         member_access: MemberAccess,
         array_index: ArrayIndex,
+        generic: Generic,
         
         block: Block,
         forr: For,

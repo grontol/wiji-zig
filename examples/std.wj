@@ -1,5 +1,82 @@
-extern pub fn printf(fmt: string, ...args: any)
+extern pub fn printf(fmt: string, ...args: any): i32
 extern pub fn malloc(size: usize): voidptr
 extern pub fn realloc(ptr: voidptr, size: usize): voidptr
 extern pub fn memcpy(dest: voidptr, src: voidptr, n: usize): voidptr
 extern pub fn rand(): i32
+
+const SEEK_SET = 0
+const SEEK_CUR = 1
+const SEEK_END = 2
+
+extern fn fopen(filename: string, mode: string): voidptr
+extern fn fclose(stream: voidptr): i32
+extern fn fseek(stream: voidptr, offset: i64, whence: i32): i32
+extern fn ftell(stream: voidptr): i64
+extern fn fread(ptr: voidptr, size: usize, n: usize, stream: voidptr): usize
+
+pub fn readEntireFile(path: string): String {
+    const f = fopen(path, "rb")
+    
+    fseek(f, 0, SEEK_END)
+    const size = ftell(f) as usize
+    fseek(f, 0, SEEK_SET)
+    
+    var data: *char = malloc(size + 1)
+    
+    fread(data, 1, size + 1, f)
+    data[size] = 0
+    
+    fclose(f)
+    
+    return .{ data = data, len = size }
+}
+
+struct String {
+    data: *char
+    len: usize
+    
+    pub fn split(self: @Self, delimiter: char): []String {
+        val res: [dyn]String = .[]
+        
+        var start: usize = 0
+        var len: usize = 0
+        var i: usize = 0
+        
+        while i < self.len {
+            if self.data[i] == delimiter {
+                res.append(.{ data = self.data + start, len = len })
+                start = i + 1
+                len = 0
+            }
+            else {
+                len += 1
+            }
+            
+            i += 1
+        }
+        
+        res.append(.{ data = self.data + start, len = len })
+        
+        return res.toArray()
+    }
+    
+    pub fn substring(self: @Self, start: usize): String {
+        return .{ data = self.data + start, len = self.len - start }
+    }
+    
+    pub fn toInt(self: @Self): i32 {
+        var res = 0
+        
+        for i in 0..self.len {
+            if self.data[i] >= '0' && self.data[i] <= '9' {
+                const x = self.data[i] - '0'
+                res = res * 10 + x as i32
+            }
+            else {
+                return 0
+            }
+        }
+        
+        return res
+    }
+}

@@ -368,6 +368,16 @@ const Parser = struct {
                         },
                         TokenKind.Dot => expr = self.parseMemberAccess(expr),
                         TokenKind.OpenSqBracket => expr = self.parseArrayIndex(expr),
+                        TokenKind.Lt => {
+                            const ex = self.tryParseGeneric(expr);
+                            
+                            if (ex) |e| {
+                                expr = e;
+                            }
+                            else {
+                                break;
+                            }
+                        },
                         else => break,
                     }
                 }
@@ -1179,6 +1189,75 @@ const Parser = struct {
                 .index = index,
             }},
             .span = TokenSpan.from_span_and_token(callee.span, close_bracket_token),
+        };
+    }
+    
+    fn tryParseGeneric(self: *Parser, callee: ast.Expr) ?ast.Expr {        
+        switch (callee.value) {
+            .identifier,
+            .member_access => {},
+            else => {
+                return null;
+            }
+        }
+        
+        self.ts.mark();
+        
+        var opening_count: i32 = 0;
+        
+        while (self.ts.hasNext()) {
+            switch (self.ts.next().kind) {
+                .Lt => {
+                    opening_count += 1;
+                },
+                .Gt => {
+                    opening_count -= 1;
+                },
+                .Identifier,
+                .Comma => {},
+                else => {
+                    self.ts.restore();
+                    return null;
+                }
+            }
+            
+            if (opening_count == 0) break;
+        }
+        
+        self.ts.restore();
+        
+        _ = self.ts.nextExpect(.Lt);
+               
+        var children: std.ArrayList(ast.Type) = .empty;
+        var has_comma = true;
+        
+        while (self.ts.hasNext()) {
+            if (self.ts.peek().kind == .Gt) break;
+            
+            if (!has_comma) {
+                self.reporter.reportErrorAtToken(self.ts.current(), "Expected comma", .{});
+            }
+            
+            children.append(self.temp_allocator, self.parseType()) catch unreachable;
+            
+            if (self.ts.peek().kind == .Comma) {
+                _ = self.ts.next();
+                has_comma = true;
+            }
+            else {
+                has_comma = false;
+            }
+        }
+        
+        // Gt (>)
+        const gt_token = self.ts.next();
+        
+        return .{
+            .span = TokenSpan.from_span_and_token(callee.span, gt_token),
+            .value = .{.generic = .{
+                .callee = self.makeExprPointer(callee),
+                .children = self.collectAndFreeTempList(ast.Type, &children),
+            }}
         };
     }
     

@@ -67,6 +67,7 @@ const FnDeclData = struct {
     ast: *const ast.FnDecl,
     span: TokenSpan,
     scope: *Scope,
+    external_type_params: []const *const Type = &.{},
 };
 
 const StructDeclData = struct {
@@ -421,6 +422,7 @@ const Typer = struct {
                 .name = symbol,
                 .default_value = param_default_value,
                 .typ = param_typ,
+                .is_variadic = is_variadic,
             });
             
             param_types.appendAssumeCapacity(param_typ);
@@ -672,7 +674,16 @@ const Typer = struct {
                         }) catch unreachable;
                     }
                     
-                    self.fn_decl_datas.append(self.temp_allocator, fn_decl_data) catch unreachable;
+                    if (struct_typ.value.@"struct".type_params.len == 0) {
+                        self.fn_decl_datas.append(self.temp_allocator, fn_decl_data) catch unreachable;
+                    }
+                    else {
+                        const fn_decl_ptr = self.arena.create(FnDeclData) catch unreachable;
+                        fn_decl_ptr.* = fn_decl_data;
+                        fn_decl_ptr.*.external_type_params = struct_typ.value.@"struct".type_params;
+                        
+                        self.generic_fn_decls.put(fn_decl_data.typ.type_id, fn_decl_ptr) catch unreachable;
+                    }
                 },
                 .struct_decl => {
                     self.struct_decl_datas.append(
@@ -1567,6 +1578,7 @@ const Typer = struct {
             ast.Kind.address_of    => return self.typeAddressOf(scope, &expr.value.address_of, exp_typ),
             ast.Kind.cast          => return self.typeCast(scope, &expr.value.cast, expr.span),
             ast.Kind.intrinsic     => return self.typeIntrinsic(scope, &expr.value.intrinsic),
+            ast.Kind.generic       => return self.typeGeneric(scope, &expr.value.generic, expr.span),
             
             else => {
                 std.debug.panic("TODO: typeExpr {s}", .{@tagName(expr.value)});
@@ -1923,6 +1935,25 @@ const Typer = struct {
                 else => {},
             }
         }
+        else if (lhs.typ.kind == .char and rhs.typ.kind == .char) {
+            switch (bin.op.kind) {
+                .Lt,
+                .Lte,
+                .Gt,
+                .Gte,
+                .EqEq,
+                .NotEq => {
+                    valid = true;
+                    typ = types.BOOL;
+                },
+                .Plus,
+                .Minus => {
+                    valid = true;
+                    typ = types.CHAR;
+                },
+                else => {},
+            }
+        }
         else if (lhs.typ.kind == .@"enum" and rhs.typ.kind == .@"enum") {
             if (lhs.typ.type_id == rhs.typ.type_id) {
                 switch (bin.op.kind) {
@@ -2042,6 +2073,16 @@ const Typer = struct {
                     }
                 },
                 else => {}
+            }
+        }
+        else if (lhs.typ.kind == .pointer and rhs.typ.kind == .numeric and rhs.typ.value.numeric.isInt()) {
+            switch (bin.op.kind) {
+                .Plus,
+                .Minus => {
+                    valid = true;
+                    typ = lhs.typ;
+                },
+                else => {},
             }
         }
         
@@ -2178,6 +2219,10 @@ const Typer = struct {
         else if (callee.typ.kind == .pointer) {
             is_raw_pointer = true;
             child_typ = callee.typ.value.pointer.child;
+        }
+        else if (callee.typ.kind == .voidptr) {
+            is_raw_pointer = true;
+            child_typ = types.U8;
         }
         else {
             self.reporter.reportErrorAtSpan(arr.callee.span, "Not an array", .{});
@@ -2553,9 +2598,6 @@ const Typer = struct {
         else unreachable;
         
         if (std.mem.eql(u8, member_text, "len")) {
-            const args = self.arena.alloc(*const tast.Expr, 1) catch unreachable;
-            args[0] = ar;
-            
             return .{
                 .typ = types.UNTYPED_INT,
                 .mutability = .mutable,
@@ -2563,9 +2605,6 @@ const Typer = struct {
             };
         }
         else if (std.mem.eql(u8, member_text, "ptr")) {
-            const args = self.arena.alloc(*const tast.Expr, 1) catch unreachable;
-            args[0] = ar;
-            
             const typ = self.type_manager.createPointer(ar_typ.child);
             
             return .{
@@ -2575,9 +2614,6 @@ const Typer = struct {
             };
         }
         else if (std.mem.eql(u8, member_text, "cap")) {
-            const args = self.arena.alloc(*const tast.Expr, 1) catch unreachable;
-            args[0] = ar;
-            
             return .{
                 .typ = types.UNTYPED_INT,
                 .mutability = .mutable,
@@ -2593,6 +2629,15 @@ const Typer = struct {
                     .typ = self.type_manager.createFn(null, param_types, &.{}, types.VOID, false, true, false),
                     .mutability = .constant,
                     .value = .{ .builtin = .{ .dynarray_append = .{ .arr = ar, .is_reference = is_reference } } }
+                };
+            }
+            else if (std.mem.eql(u8, member_text, "toArray")) {
+                const typ = self.type_manager.createArray(ar_typ.child, false, null);
+                
+                return .{
+                    .typ = self.type_manager.createFn(null, &.{}, &.{}, typ, false, true, false),
+                    .mutability = .constant,
+                    .value = .{ .builtin = .{ .dynarray_to_array = .{ .arr = ar, .is_reference = is_reference, .dest_typ = typ } } }
                 };
             }
             else {
@@ -2852,6 +2897,58 @@ const Typer = struct {
         }
     }
     
+    fn typeGeneric(self: *Typer, scope: *Scope, gen: *const ast.Generic, span: TokenSpan) tast.Expr {
+        const callee = self.typeExpr(scope, gen.callee, types.UNKNOWN);
+        
+        var children = std.ArrayList(*const Type).initCapacity(self.arena, gen.children.len) catch unreachable;
+                
+        for (gen.children) |child| {
+            children.appendAssumeCapacity(self.typeType(scope, &child));
+        }
+        
+        switch (callee.typ.kind) {
+            .typ => {
+                if (callee.typ.value.typ.child.kind == .@"struct") {
+                    if (gen.children.len != callee.typ.value.typ.child.value.@"struct".type_params.len) {
+                        self.reporter.reportErrorAtSpan(
+                            span,
+                            "Expected {} generic parameter, but got {}",
+                            .{
+                                callee.typ.value.typ.child.value.@"struct".type_params.len,
+                                gen.children.len,
+                            }
+                        );
+                    }
+                    
+                    const generic_typ = self.type_manager.createGenericStruct(callee.typ.value.typ.child, children.items);
+                    const container_typ = self.type_manager.createType(generic_typ);
+                    
+                    if (callee.typ.value.typ.child.value.@"struct".state == .done) {
+                        generic_typ.fillGenericStruct(self.type_manager);
+                    }
+                    else {
+                        self.generic_structs.put(generic_typ.type_id, generic_typ) catch unreachable;
+                    }
+                    
+                    return .{
+                        .value = .{ .typ = generic_typ },
+                        .typ = container_typ,
+                        .mutability = .constant,
+                    };
+                }
+                else {
+                    self.reporter.reportErrorAtSpan(span, "type `{s}` is not generic", .{callee.typ.getTextLeak(self.arena)});
+                }
+            },
+            .type_param => {
+                std.debug.panic("TODO: typeType nested generic", .{});
+            },
+            else => {
+                self.reporter.reportErrorAtSpan(span, "`{s}` is not a type", .{callee.typ.getTextLeak(self.arena)});
+            },
+        }
+    }
+    
     fn typeType(self: *Typer, scope: *Scope, typ: *const ast.Type) *const Type {
         switch (typ.value) {
             ast.TypeKind.simple => {
@@ -2864,6 +2961,18 @@ const Typer = struct {
                     if (scope.get(typ_text)) |sym| {
                         switch (sym.typ.kind) {
                             .typ => {
+                                if (sym.typ.value.typ.child.kind == .@"struct") {
+                                    if (sym.typ.value.typ.child.value.@"struct".type_params.len > 0) {
+                                        self.reporter.reportErrorAtToken(
+                                            typ.value.simple.name,
+                                            "Expected {} generic parameter, but none given",
+                                            .{
+                                                sym.typ.value.typ.child.value.@"struct".type_params.len,
+                                            }
+                                        );
+                                    }
+                                }
+                                
                                 return sym.typ.value.typ.child;
                             },
                             .type_param => {
