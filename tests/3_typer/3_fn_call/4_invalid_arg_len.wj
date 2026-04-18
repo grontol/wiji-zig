@@ -2,7 +2,7 @@ fn main() {
     foo()
 }
 
-fn foo(x: i32, y: f32, s: string, c: char) {
+fn foo(x: i32, y: f32, s: string, c: u8) {
     
 }
 

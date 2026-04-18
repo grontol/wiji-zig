@@ -310,10 +310,10 @@ const Parser = struct {
     }
     
     fn parsePrimaryExpr(self: *Parser) ast.Expr {
-        const kind = self.ts.peek().kind;
+        const token = self.ts.peek();
         var expr: ast.Expr = undefined;
         
-        switch (kind) {
+        switch (token.kind) {
             TokenKind.IntLit,
             TokenKind.IntBinLit,
             TokenKind.IntOctLit,
@@ -324,7 +324,7 @@ const Parser = struct {
             TokenKind.Identifier,
             TokenKind.TrueLit,
             TokenKind.FalseLit => {
-                switch (kind) {
+                switch (token.kind) {
                     TokenKind.IntLit    => { expr = ast.Literal.create_expr(ast.LitKind.Int, self.ts.next()); },
                     TokenKind.IntBinLit => { expr = ast.Literal.create_expr(ast.LitKind.IntBin, self.ts.next()); },
                     TokenKind.IntOctLit => { expr = ast.Literal.create_expr(ast.LitKind.IntOct, self.ts.next()); },
@@ -415,6 +415,7 @@ const Parser = struct {
             TokenKind.KeywordWhile => expr = self.parseWhile(),
             TokenKind.KeywordBreak => expr = self.parseBreak(),
             TokenKind.KeywordIf => expr = self.parseIf(),
+            TokenKind.KeywordSwitch => expr = self.parseSwitch(),
             TokenKind.KeywordVal,
             TokenKind.KeywordVar,
             TokenKind.KeywordConst => expr = self.parseVarDecl(),
@@ -453,12 +454,13 @@ const Parser = struct {
             },
             
             else => {
-                std.debug.panic("Not Implemented : parsePrimaryExpr {s}", .{@tagName(kind)});
+                self.reporter.reportErrorAtToken(token, "Unexpected token `{s}`", .{self.getTokenText(token)});
             },
         }
         
         switch (self.ts.peek().kind) {
-            TokenKind.DotDot => expr = self.parseRange(expr),
+            TokenKind.DotDot,
+            TokenKind.DotDotDot => expr = self.parseRange(expr),
             TokenKind.KeywordAs => expr = self.parseCast(expr),
             else => {}
         }
@@ -1090,6 +1092,104 @@ const Parser = struct {
         };
     }
     
+    fn parseSwitch(self: *Parser) ast.Expr {
+        const switch_token = self.ts.nextExpect(.KeywordSwitch);
+        const expr = self.makeExprPointer(self.parseExpr());
+        var partial = false;
+        
+        if (self.ts.peek().kind == .At) {
+            const at_token = self.ts.next();
+            const token = self.ts.next();
+            
+            if (token.kind == .Identifier and std.mem.eql(u8, self.getTokenText(token), "partial")) {
+                partial = true;
+            }
+            else {
+                self.reporter.reportErrorAtToken(at_token, "Invalid `@` modifier", .{});
+            }
+        }
+        
+        _ = self.ts.nextExpect(.OpenCurlyBracket);
+        
+        var cases = std.ArrayList(ast.SwitchCase).empty;
+        var has_else = false;
+        var has_comma = true;
+        
+        while (self.ts.hasNext()) {
+            if (self.ts.peek().kind == .CloseCurlyBracket) break;
+            
+            if (!has_comma) {
+                self.reporter.reportErrorAtToken(self.ts.current(), "Expected comma", .{});
+            }
+            
+            var conditions = std.ArrayList(ast.Expr).empty;
+            var fallthrough = false;
+            
+            switch (self.ts.peek().kind) {
+                TokenKind.KeywordElse => {
+                    if (has_else) {
+                        self.reporter.reportErrorAtToken(self.ts.next(), "Multiple else in switch", .{});
+                    }
+                    
+                    _ = self.ts.next();
+                    has_else = true;
+                },
+                else => {
+                    while (self.ts.hasNext()) {
+                        conditions.append(self.temp_allocator, self.parseExpr()) catch unreachable;
+                        
+                        if (self.ts.peek().kind == .Comma) {
+                            _ = self.ts.next();
+                        }
+                        else {
+                            break;
+                        }
+                    }
+                },
+            }
+            
+            if (self.ts.peek().kind == .At) {
+                const at_token = self.ts.next();
+                const token = self.ts.next();
+                
+                if (token.kind == .Identifier and std.mem.eql(u8, self.getTokenText(token), "fallthrough")) {
+                    fallthrough = true;
+                }
+                else {
+                    self.reporter.reportErrorAtToken(at_token, "Invalid `@` modifier", .{});
+                }
+            }
+            
+            _ = self.ts.nextExpect(.Arrow);
+            const body = self.makeExprPointer(self.parseExpr());
+            
+            cases.append(self.temp_allocator, .{
+                .conditions = self.collectAndFreeTempList(ast.Expr, &conditions),
+                .body = body,
+                .fallthrough = fallthrough,
+            }) catch unreachable;
+            
+            if (self.ts.peek().kind == .Comma) {
+                _ = self.ts.next();
+                has_comma = true;
+            }
+            else {
+                has_comma = false;
+            }
+        }
+        
+        _ = self.ts.nextExpect(.CloseCurlyBracket);
+        
+        return .{
+            .span = TokenSpan.from_token(switch_token),
+            .value = .{.switc = .{
+                .expr = expr,
+                .cases = self.collectAndFreeTempList(ast.SwitchCase, &cases),
+                .partial = partial,
+            }},
+        };
+    }
+    
     fn parseUnary(self: *Parser) ast.Expr {
         const op = self.ts.next();
         
@@ -1145,14 +1245,9 @@ const Parser = struct {
     }
     
     fn parseRange(self: *Parser, lhs: ast.Expr) ast.Expr {
-        _ = self.ts.nextExpect(.DotDot);
-        var is_eq = false;
+        const op_token = self.ts.nextExpectAny(&.{ TokenKind.DotDot, TokenKind.DotDotDot });
         
-        if (self.ts.peek().kind == .Eq) {
-            _ = self.ts.next();
-            is_eq = true;
-        }
-        
+        const is_eq = op_token.kind == .DotDotDot;        
         const rhs = self.parseExpr();
         
         return .{

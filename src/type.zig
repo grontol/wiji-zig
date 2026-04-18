@@ -50,7 +50,6 @@ pub const TypeKind = enum {
     void,
     numeric,
     string,
-    char,
     bool,
     @"enum",
     any,
@@ -202,7 +201,6 @@ pub const Type = struct {
         void,
         numeric: NumericKind,
         string,
-        char,
         bool,
         @"enum": TypeEnum,
         any,
@@ -242,8 +240,7 @@ pub const Type = struct {
         if (other.value == TypeKind.unknown) return true;
         if (self.isSame(other)) return true;
         if (self.kind == .voidptr and other.kind == .pointer or self.kind == .pointer and other.kind == .voidptr) return true;
-        if (self.kind == .numeric and self.value.numeric.isInt() and self.value.numeric.isUntyped() and other.kind == .char) return true;
-        if (self.kind == .string and other.kind == .pointer and other.value.pointer.child.kind == .char) return true;
+        if (self.kind == .string and other.kind == .pointer and other.value.pointer.child.isChar()) return true;
         if (self.kind != other.kind) return false;
         
         switch (self.kind) {
@@ -263,8 +260,23 @@ pub const Type = struct {
                     }
                 }
                 else if (self.value.numeric.isInt()) {
-                    if (other.value.numeric.isInt() and other.value.numeric.isUntyped()) {
-                        return true;
+                    if (other.value.numeric.isInt()) {
+                        if (other.value.numeric.isUntyped()) {
+                            return true;
+                        }
+                        else {
+                            if (self.value.numeric.isUnsigned() == other.value.numeric.isUnsigned()) {
+                                return other.size >= self.size;
+                            }
+                            else if (self.value.numeric.isUnsigned() == !other.value.numeric.isUnsigned()) {
+                                return other.size >= self.size * 2;
+                            }
+                            else {
+                                return other.size * 2 >= self.size;
+                            }
+                            
+                            return true;
+                        }
                     }
                 }
                 else if (self.value.numeric.isFloat()) {
@@ -278,7 +290,6 @@ pub const Type = struct {
             },
             
             TypeKind.string,
-            TypeKind.char => { return true; },
             TypeKind.array => {
                 if (self.value.array.child.kind == .unknown) return true;
                 
@@ -377,8 +388,7 @@ pub const Type = struct {
     pub fn canBeUsedAsCond(self: *const Type) bool {
         switch (self.kind) {
             TypeKind.bool,
-            TypeKind.numeric,
-            TypeKind.char => return true,
+            TypeKind.numeric => return true,
             
             else => return false,
         }
@@ -391,8 +401,6 @@ pub const Type = struct {
     pub fn canBeCastTo(self: *const Type, other: *const Type) bool {
         if ((self.kind == .numeric or self.kind == .voidptr)
             and (other.kind == .numeric or other.kind == .voidptr)) return true;
-        
-        if (self.kind == .char and other.kind == .numeric and other.value.numeric.isInt()) return true;
         
         if (self.kind == .pointer and self.value.pointer.child.kind == .numeric
             and self.value.pointer.child.value.numeric == .u8
@@ -415,7 +423,6 @@ pub const Type = struct {
         
         switch (self.value) {
             TypeKind.bool,
-            TypeKind.char,
             TypeKind.range,
             TypeKind.any,
             TypeKind.string,
@@ -519,7 +526,6 @@ pub const Type = struct {
             .void,
             .numeric,
             .string,
-            .char,
             .bool,
             .@"enum",
             .any,
@@ -619,6 +625,10 @@ pub const Type = struct {
         return self.kind == .numeric and self.value.numeric.isInt();
     }
     
+    pub fn isChar(self: *const Type) bool {
+        return self.kind == .numeric and self.value.numeric == .u8;
+    }
+    
     pub fn getTextLeak(self: *const Type, allocator: std.mem.Allocator) []const u8 {
         var str = std.ArrayList(u8).empty;
         self.getText(&str, allocator);
@@ -631,7 +641,6 @@ pub const Type = struct {
             TypeKind.unknown_enum => { out.appendSlice(allocator, "unknown_enum") catch unreachable; },
             TypeKind.void         => { out.appendSlice(allocator, "void") catch unreachable; },
             TypeKind.string       => { out.appendSlice(allocator, "string") catch unreachable; },
-            TypeKind.char         => { out.appendSlice(allocator, "char") catch unreachable; },
             TypeKind.bool         => { out.appendSlice(allocator, "bool") catch unreachable; },
             TypeKind.any          => { out.appendSlice(allocator, "any") catch unreachable; },
             TypeKind.range        => { out.appendSlice(allocator, "range") catch unreachable; },
@@ -775,7 +784,6 @@ pub const F64           = &Type{ .size = 8,  .alignment = 8, .type_id = 12, .has
 pub const UNTYPED_INT   = &Type{ .size = 8,  .alignment = 8, .type_id = 13, .hash = 13, .kind = .numeric, .value = .{ .numeric = .untyped_int } };
 pub const UNTYPED_FLOAT = &Type{ .size = 8,  .alignment = 8, .type_id = 14, .hash = 14, .kind = .numeric, .value = .{ .numeric = .untyped_float } };
 pub const STRING        = &Type{ .size = 16, .alignment = 8, .type_id = 15, .hash = 15, .kind = .string,  .value = .string };
-pub const CHAR          = &Type{ .size = 1,  .alignment = 1, .type_id = 16, .hash = 16, .kind = .char,    .value = .char };
 pub const BOOL          = &Type{ .size = 1,  .alignment = 1, .type_id = 17, .hash = 17, .kind = .bool,    .value = .bool };
 pub const RANGE         = &Type{ .size = 8,  .alignment = 4, .type_id = 18, .hash = 18, .kind = .range,   .value = .range };
 pub const ANY           = &Type{ .size = 8,  .alignment = 8, .type_id = 19, .hash = 19, .kind = .any,     .value = .any };

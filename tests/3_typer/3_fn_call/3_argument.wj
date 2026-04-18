@@ -2,7 +2,7 @@ fn main() {
     foo(10, 10.0, "str", '\n')
 }
 
-fn foo(x: i32, y: f32, s: string, c: char) {
+fn foo(x: i32, y: f32, s: string, c: u8) {
     
 }
 
@@ -17,12 +17,12 @@ Module {
             body: Block {
                 stmts: [
                     FnCall {
-                        callee: <fn(i32, f32, string, char): void> Identifier('foo'),
+                        callee: <fn(i32, f32, string, u8): void> Identifier('foo'),
                         args: [
                             <int> 10,
                             <float> 10,
                             <string> "str",
-                            <char> '\n',
+                            <u8> '\n',
                         ],
                         return_type: void,
                     },
@@ -48,7 +48,7 @@ Module {
                 },
                 FnParam {
                     name: 'c',
-                    type: char,
+                    type: u8,
                 },
             ],
             body: Block {

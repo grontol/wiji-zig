@@ -1,4 +1,4 @@
-fn foo(a: i32, b: f32, c: char, d: string) {
+fn foo(a: i32, b: f32, c: u8, d: string) {
     
 }
 
@@ -20,7 +20,7 @@ Module {
                 },
                 FnParam {
                     name: 'c',
-                    type: char,
+                    type: u8,
                 },
                 FnParam {
                     name: 'd',

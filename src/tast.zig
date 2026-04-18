@@ -95,6 +95,17 @@ pub const IfExpr = struct {
     false_expr: *Expr,
 };
 
+pub const SwitchCase = struct {
+    conditions: []const Expr,
+    body: *Stmt,
+    fallthrough: bool,
+};
+
+pub const Switch = struct {
+    expr: *Expr,
+    cases: []const SwitchCase,
+};
+
 pub const While = struct {
     condition: *Expr,
     body: *Stmt,
@@ -108,6 +119,10 @@ pub const ForRange = struct {
 };
 
 pub const ForEach = struct {
+    kind: enum {
+        array,
+        string,
+    },
     item_var: ?Symbol,
     item_typ: ?*const Type,
     index_var: ?Symbol,
@@ -275,6 +290,7 @@ pub const StmtKind = enum {
     assignment,
     fn_call,
     iff,
+    switc,
     for_range,
     for_each,
     whil,
@@ -291,6 +307,7 @@ pub const Stmt = union(StmtKind) {
     assignment: Assignment,
     fn_call: FnCall,
     iff: If,
+    switc: Switch,
     for_range: ForRange,
     for_each: ForEach,
     whil: While,

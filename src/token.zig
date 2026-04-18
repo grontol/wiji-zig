@@ -20,6 +20,7 @@ pub const TokenKind = enum(u16) {
     KeywordIn,
     KeywordIf,
     KeywordElse,
+    KeywordSwitch,
     KeywordPub,
     KeywordStruct,
     KeywordEnum,
@@ -49,6 +50,7 @@ pub const TokenKind = enum(u16) {
     Semicolon,
     QMark,
     At,
+    Arrow,
     
     Eq = TAG_ASSIGNMENT << 8,
     PlusEq,

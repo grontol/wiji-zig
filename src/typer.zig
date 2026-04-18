@@ -328,6 +328,7 @@ const Typer = struct {
             .fn_call    => |call|   { return self.typeFnCallStmt(scope, &call, stmt.span); },
             .returns    => |ret|    { return self.typeReturn(scope, &ret, stmt.span); },
             .iff        => |iff|    { return self.typeIf(scope, &iff); },
+            .switc      => |switc|  { return self.typeSwitch(scope, &switc); },
             .whil       => |whil|   { return self.typeWhile(scope, &whil); },
             .forr       => |forr|   { return self.typeFor(scope, &forr); },
             .block      => |block|  { return self.typeBlockStmt(scope, &block, dont_create_new_scope); },
@@ -1421,6 +1422,119 @@ const Typer = struct {
         };
     }
     
+    fn typeSwitch(self: *Typer, scope: *Scope, switc: *const ast.Switch) tast.Stmt {
+        const expr = self.makeExprPointer(self.typeExpr(scope, switc.expr, types.UNKNOWN));
+        var satisfied_enum_items: ?[]bool = null;
+        
+        switch (expr.typ.kind) {
+            .@"enum" => {
+                satisfied_enum_items = self.temp_allocator.alloc(bool, expr.typ.value.@"enum".items.len) catch unreachable;
+                
+                for (0..expr.typ.value.@"enum".items.len) |i| {
+                    satisfied_enum_items.?[i] = false;
+                }
+            },
+            .numeric => {},
+            else => {
+                self.reporter.reportErrorAtSpan(switc.expr.span, "Switch expression must be an enum or int, but got {s}", .{
+                    expr.typ.getTextLeak(self.arena),
+                });
+            },
+        }
+        
+        var cases = std.ArrayList(tast.SwitchCase).initCapacity(self.arena, switc.cases.len) catch unreachable;
+        var has_else = false;
+        
+        for (switc.cases) |case| {
+            if (case.conditions.len > 0) {
+                var conditions = std.ArrayList(tast.Expr).initCapacity(self.arena, case.conditions.len) catch unreachable;
+                
+                for (case.conditions) |cond| {
+                    const tast_cond = self.typeExpr(scope, &cond, expr.typ);
+                    
+                    if (!tast_cond.comptime_known) {
+                        self.reporter.reportErrorAtSpan(cond.span, "Switch value must be known at compile time", .{});
+                    }
+                    
+                    if (expr.typ.kind == .@"enum") {
+                        if (!tast_cond.typ.isSame(expr.typ)) {
+                            self.reporter.reportErrorAtSpan(cond.span, "Expected enum type `{s}`, but got `{s}`", .{
+                                expr.typ.getTextLeak(self.arena),
+                                tast_cond.typ.getTextLeak(self.arena),
+                            });
+                        }
+                        
+                        std.debug.assert(tast_cond.value == .enum_value);
+                        
+                        if (!satisfied_enum_items.?[tast_cond.value.enum_value.item_index]) {
+                            satisfied_enum_items.?[tast_cond.value.enum_value.item_index] = true;
+                        }
+                        else {
+                            self.reporter.reportErrorAtSpan(cond.span, "Duplicate enum value `{s}` in switch", .{
+                                expr.typ.value.@"enum".items[tast_cond.value.enum_value.item_index].text,
+                            });
+                        }
+                    }
+                    // Numeric
+                    else {
+                        if (tast_cond.typ.kind == .range) {}
+                        else if (!tast_cond.typ.canBeAssignedTo(expr.typ)) {
+                            self.reporter.reportErrorAtSpan(cond.span, "Expected type `{s}`, but got `{s}`", .{
+                                expr.typ.getTextLeak(self.arena),
+                                tast_cond.typ.getTextLeak(self.arena),
+                            });
+                        }
+                    }
+                        
+                    conditions.appendAssumeCapacity(tast_cond);
+                }
+                
+                const body = self.makeStmtPointer(self.typeStmt(scope, case.body, false));
+                
+                cases.appendAssumeCapacity(.{
+                    .conditions = conditions.items,
+                    .body = body,
+                    .fallthrough = case.fallthrough,
+                });
+            }
+            else {
+                has_else = true;
+                
+                const body = self.makeStmtPointer(self.typeStmt(scope, case.body, false));
+                
+                cases.appendAssumeCapacity(.{
+                    .conditions = &.{},
+                    .body = body,
+                    .fallthrough = case.fallthrough,
+                });
+            }
+        }
+        
+        if (!switc.partial and !has_else) {
+            if (satisfied_enum_items) |sat| {
+                for (sat, 0..) |b, i| {
+                    if (!b) {
+                        self.reporter.reportErrorAtSpan(switc.expr.span, "Unhandled enum value `{s}` in switch", .{
+                            expr.typ.value.@"enum".items[i].text,
+                        });
+                    }
+                }
+            }
+            else {
+                self.reporter.reportErrorAtSpan(switc.expr.span, "Switch value must handle all cases. Add `else` case or `@partial` to make it non-exhaustive", .{});
+            }
+        }
+        
+        if (satisfied_enum_items) |sat| {
+            self.temp_allocator.free(sat);
+        }
+        
+        return .{.switc = .{
+            .expr = expr,
+            .cases = cases.items,
+        }};
+    }
+    
     fn typeWhile(self: *Typer, scope: *Scope, whil: *const ast.While) tast.Stmt {
         const cond = self.makeExprPointer(self.typeExpr(scope, whil.condition, types.UNKNOWN));
         
@@ -1554,6 +1668,10 @@ const Typer = struct {
                 const new_scope = scope.inherit();
                 // defer new_scope.deinit();
                 
+                if (forr.is_reference and iter.mutability == .constant) {
+                    self.reporter.reportErrorAtSpan(forr.iter.span, "Cannot iterate constant variable by reference", .{});
+                }
+                
                 const item_typ = if (forr.is_reference) self.type_manager.createReference(iter.typ.value.array.child)
                 else iter.typ.value.array.child;
                 
@@ -1568,6 +1686,38 @@ const Typer = struct {
                 const body = self.makeStmtPointer(self.typeStmt(new_scope, forr.body, true));
                 
                 return .{.for_each = .{
+                    .kind = .array,
+                    .item_var = item_var,
+                    .index_var = index_var,
+                    .item_typ = item_typ,
+                    .is_reference = forr.is_reference,
+                    .iter = self.makeExprPointer(iter),
+                    .body = body,
+                }};
+            },
+            .string => {
+                const new_scope = scope.inherit();
+                // defer new_scope.deinit();
+                
+                if (forr.is_reference and iter.mutability == .constant) {
+                    self.reporter.reportErrorAtSpan(forr.iter.span, "Cannot iterate constant variable by reference", .{});
+                }
+                
+                const item_typ = if (forr.is_reference) self.type_manager.createReference(types.U8)
+                else types.U8;
+                
+                if (item_var) |v| {
+                    scope.set(v.text, v, item_typ, false, .constant);
+                }
+                
+                if (index_var) |v| {
+                    scope.set(v.text, v, types.I32, false, .constant);
+                }
+                
+                const body = self.makeStmtPointer(self.typeStmt(new_scope, forr.body, true));
+                
+                return .{.for_each = .{
+                    .kind = .string,
                     .item_var = item_var,
                     .index_var = index_var,
                     .item_typ = item_typ,
@@ -1742,7 +1892,7 @@ const Typer = struct {
                 return tast.Expr{
                     .comptime_known = true,
                     .mutability = .constant,
-                    .typ = types.CHAR,
+                    .typ = types.U8,
                     .value = .{ .literal = .{ .char = value } },
                 };
             },
@@ -1987,25 +2137,6 @@ const Typer = struct {
                 .OrOr => {
                     valid = true;
                     typ = types.BOOL;
-                },
-                else => {},
-            }
-        }
-        else if (lhs.typ.kind == .char and rhs.typ.kind == .char) {
-            switch (bin.op.kind) {
-                .Lt,
-                .Lte,
-                .Gt,
-                .Gte,
-                .EqEq,
-                .NotEq => {
-                    valid = true;
-                    typ = types.BOOL;
-                },
-                .Plus,
-                .Minus => {
-                    valid = true;
-                    typ = types.CHAR;
                 },
                 else => {},
             }
@@ -2337,6 +2468,7 @@ const Typer = struct {
                 .rhs = rhs,
                 .is_eq = range.is_eq,
             }},
+            .comptime_known = lhs.comptime_known and rhs.comptime_known,
         };
     }
     
@@ -2555,6 +2687,7 @@ const Typer = struct {
                     .typ = enum_typ,
                     .mutability = .constant,
                     .value = .{.enum_value = .{ .item_index = i }},
+                    .comptime_known = true,
                 };
             }
         }
@@ -3158,7 +3291,6 @@ const Typer = struct {
         else if (std.mem.eql(u8, typ_text, "f64"))   { return types.F64; }
         
         else if (std.mem.eql(u8, typ_text, "bool"))   { return types.BOOL; }
-        else if (std.mem.eql(u8, typ_text, "char"))   { return types.CHAR; }
         else if (std.mem.eql(u8, typ_text, "string")) { return types.STRING; }
         else if (std.mem.eql(u8, typ_text, "range"))  { return types.RANGE; }
         

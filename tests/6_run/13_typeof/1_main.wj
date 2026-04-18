@@ -52,7 +52,7 @@ extern fn printf(fmt: string, ...args: any)
 @typeOf(y) = f32
 @typeOf(foo) = Foo
 @typeOf(str) = string
-@typeOf(chr) = char
+@typeOf(chr) = u8
 @typeOf(Foo) = type(struct:Foo)
 @typeOf(Foo.foo) = fn(): void
 @typeOf(Foo.bar) = fn(&Foo): void

@@ -275,6 +275,7 @@ const Cgen = struct {
             .fn_call    => |fn_call|   { self.genFnCall(&fn_call); },
             .returns    => |ret|       { self.genReturn(&ret); },
             .iff        => |iff|       { self.genIf(&iff); has_semicolon = false; },
+            .switc      => |switc|     { self.genSwitch(&switc); },
             .whil       => |whil|      { self.genWhile(&whil); has_semicolon = false; },
             .for_range  => |for_range| { self.genForRange(&for_range); has_semicolon = false; },
             .for_each   => |for_each|  { self.genForEach(&for_each); has_semicolon = false; },
@@ -440,6 +441,68 @@ const Cgen = struct {
         }
     }
     
+    fn genSwitch(self: *Cgen, switc: *const tast.Switch) void {
+        self.write("switch (");
+        self.genExpr(switc.expr);
+        self.write(") {{\n");
+        self.indent += 1;
+        
+        for (switc.cases) |case| {
+            if (case.conditions.len > 0) {
+                for (case.conditions) |cond| {
+                    if (cond.value == .range) {
+                        self.writeIndent();
+                        self.write("case ");
+                        self.genExpr(cond.value.range.lhs);
+                        self.write(" ... ");
+                        self.genExpr(cond.value.range.rhs);
+                        
+                        if (!cond.value.range.is_eq) {
+                            self.write(" - 1");
+                        }
+                        
+                        self.write(":\n");
+                    }
+                    else {
+                        self.writeIndent();
+                        self.write("case ");
+                        self.genExpr(&cond);
+                        self.write(":\n");
+                    }
+                }
+                
+                self.indent += 1;
+                self.writeIndent();
+                self.genStmt(case.body, true);
+                
+                if (!case.fallthrough) {
+                    self.writeIndent();
+                    self.write("break;\n");
+                }
+                
+                self.indent -= 1;
+            }
+            else {
+                self.writeIndent();
+                self.write("default:\n");
+                self.indent += 1;
+                self.writeIndent();
+                self.genStmt(case.body, true);
+                
+                if (!case.fallthrough) {
+                    self.writeIndent();
+                    self.write("break;\n");
+                }
+                
+                self.indent -= 1;
+            }
+        }
+        
+        self.indent -= 1;
+        self.writeIndent();
+        self.write("}}");
+    }
+    
     fn genWhile(self: *Cgen, whil: *const tast.While) void {
         self.write("while (");
         self.genExpr(whil.condition);
@@ -472,6 +535,7 @@ const Cgen = struct {
         
         self.write("{{\n");
         self.indent += 1;
+        self.writeIndent();
         self.genStmt(for_range.body, true);
         self.indent -= 1;
         self.writeIndent();
@@ -499,7 +563,15 @@ const Cgen = struct {
         self.write(";\n");
         
         self.writeIndent();
-        self.writeArgs("for (int {[index_var]s} = 0; {[index_var]s} < {[iter_var]s}.len; {[index_var]s}++) ", .{ .index_var = index_var_name, .iter_var = iter_name });
+        
+        switch (for_each.kind) {
+            .array => self.writeArgs("for (int {[index_var]s} = 0; {[index_var]s} < {[iter_var]s}.len; {[index_var]s}++) ", .{
+                .index_var = index_var_name, .iter_var = iter_name
+            }),
+            .string => self.writeArgs("for (int {[index_var]s} = 0; {[index_var]s} < strlen({[iter_var]s}); {[index_var]s}++) ", .{
+                .index_var = index_var_name, .iter_var = iter_name
+            }),
+        }
         
         self.write("{{\n");
         self.indent += 1;
@@ -513,7 +585,10 @@ const Cgen = struct {
                 self.write("&");
             }
             
-            self.writeArgs("{s}.ptr[{s}];\n", .{iter_name, index_var_name});
+            switch (for_each.kind) {
+                .array  => self.writeArgs("{s}.ptr[{s}];\n", .{iter_name, index_var_name}),
+                .string => self.writeArgs("{s}[{s}];\n", .{iter_name, index_var_name}),
+            }
         }
         
         self.writeIndent();
@@ -782,7 +857,6 @@ const Cgen = struct {
         switch (typ.value) {
             .unknown,
             .bool,
-            .char,
             .string,
             .void => {
                 typ.getText(self.cur_src, self.allocator);

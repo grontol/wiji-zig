@@ -1,8 +1,33 @@
 import "std.wj"
 
-fn main() {
-    const s = String.fromCString("Saya siapa")
-    const ss = s.substring(3, 3)
+enum Dir {
+    left,
+    right,
+    up,
+    down,
     
-    printf("%.*s\n", ss.len, ss.data)
+    fn print(self: @Self) {
+        switch self @partial {
+            .up, .down @fallthrough => printf("Up or Down\n"),
+            .left  => {
+                printf("Left\n")
+            },
+        }
+    }
+}
+
+fn main() {
+    Dir.right.print()
+    
+    const s = "ASCII (American Standard Code for Information Interchange) is a 7-bit character"
+    
+    for ch in s {
+        printf("%c => ", ch)
+        
+        switch ch {
+            '0'...'9' => printf("Digit\n"),
+            'a'...'z' => printf("Alphabet\n"),
+            else => printf("Symbol\n")
+        }
+    }
 }

@@ -138,6 +138,7 @@ const Lexer = struct {
         else if (std.mem.eql(u8, text, "in"))        { self.pushToken(TokenKind.KeywordIn, start, end); }
         else if (std.mem.eql(u8, text, "if"))        { self.pushToken(TokenKind.KeywordIf, start, end); }
         else if (std.mem.eql(u8, text, "else"))      { self.pushToken(TokenKind.KeywordElse, start, end); }
+        else if (std.mem.eql(u8, text, "switch"))    { self.pushToken(TokenKind.KeywordSwitch, start, end); }
         else if (std.mem.eql(u8, text, "pub"))       { self.pushToken(TokenKind.KeywordPub, start, end); }
         else if (std.mem.eql(u8, text, "struct"))    { self.pushToken(TokenKind.KeywordStruct, start, end); }
         else if (std.mem.eql(u8, text, "enum"))      { self.pushToken(TokenKind.KeywordEnum, start, end); }
@@ -362,6 +363,23 @@ const Lexer = struct {
         }
     }
     
+    fn pushTokenMaybeTwoMulti(self: *Lexer, nexts: []const u8, kind_one: TokenKind, kind_twos: []const TokenKind, index: usize) void {
+        std.debug.assert(nexts.len == kind_twos.len);
+        
+        const ch = self.chs.peek();
+        
+        for (0..nexts.len) |i| {
+            if (ch == nexts[i]) {
+                _ = self.chs.next();
+                self.pushToken(kind_twos[i], index, index + 2);
+                
+                return;
+            }
+        }
+        
+        self.pushToken(kind_one, index, index + 1);
+    }
+    
     fn pushTokenMaybeThree(
         self: *Lexer,
         next2: u8, next3: u8,
@@ -428,7 +446,6 @@ pub fn tokenize(allocator: std.mem.Allocator, reporter: *const Reporter, file_id
             '@'         => lexer.pushTokenOne(.At, i),
             
             ':'         => lexer.pushTokenMaybeTwo(':', .Colon, .ColonColon, i),
-            '='         => lexer.pushTokenMaybeTwo('=', .Eq, .EqEq, i),
             '-'         => lexer.pushTokenMaybeTwo('=', .Minus, .MinusEq, i),
             '%'         => lexer.pushTokenMaybeTwo('=', .Mod, .ModEq, i),
             '<'         => lexer.pushTokenMaybeTwo('=', .Lt, .Lte, i),
@@ -436,6 +453,7 @@ pub fn tokenize(allocator: std.mem.Allocator, reporter: *const Reporter, file_id
             '!'         => lexer.pushTokenMaybeTwo('=', .Not, .NotEq, i),
             '|'         => lexer.pushTokenMaybeTwo('|', .Or, .OrOr, i),
             '&'         => lexer.pushTokenMaybeTwo('&', .And, .AndAnd, i),
+            '='         => lexer.pushTokenMaybeTwoMulti(&.{'=', '>'}, .Eq, &.{.EqEq, .Arrow}, i),
             
             '.'         => lexer.pushTokenMaybeThree('.', '.', .Dot, .DotDot, .DotDotDot, i),
             

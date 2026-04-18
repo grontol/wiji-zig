@@ -22,7 +22,7 @@ pub fn readEntireFile(path: string): String {
     const size = ftell(f) as usize
     fseek(f, 0, SEEK_SET)
     
-    var data: *char = malloc(size + 1)
+    var data: *u8 = malloc(size + 1)
     
     fread(data, 1, size + 1, f)
     data[size] = 0
@@ -33,7 +33,7 @@ pub fn readEntireFile(path: string): String {
 }
 
 pub struct String {
-    data: *char
+    data: *u8
     len: usize
     
     pub fn fromCString(str: string): @Self {
@@ -43,7 +43,7 @@ pub struct String {
         }
     }
     
-    pub fn split(self: @Self, delimiter: char): []String {
+    pub fn split(self: @Self, delimiter: u8): []@Self {
         val res: [dyn]String = .[]
         
         var start: usize = 0
@@ -68,11 +68,26 @@ pub struct String {
         return res.toArray()
     }
     
-    pub fn substring(self: @Self, start: usize, len: usize = 0): String {
+    pub fn substring(self: @Self, start: usize, len: usize = 0): @Self {
         var aLen = len
         if aLen == 0 aLen = self.len - start
         
         return .{ data = self.data + start, len = aLen }
+    }
+    
+    pub fn toUpper(self: @Self): @Self {
+        var newData: *u8 = malloc(self.len)
+        
+        for i in 0..self.len {
+            if self.data[i] >= 'a' && self.data[i] <= 'z' {
+                newData[i] = self.data[i] - 32
+            }
+            else {
+                newData[i] = self.data[i]
+            }
+        }
+        
+        return .{ data = newData, len = self.len }
     }
     
     pub fn toInt(self: @Self): i32 {

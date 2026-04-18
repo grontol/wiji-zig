@@ -169,6 +169,18 @@ pub const If = struct {
     else_expr: ?*Expr,
 };
 
+pub const SwitchCase = struct {
+    conditions: []const Expr,
+    body: *Expr,
+    fallthrough: bool,
+};
+
+pub const Switch = struct {
+    expr: *Expr,
+    cases: []const SwitchCase,
+    partial: bool,
+};
+
 pub const Assignment = struct {
     lhs: *Expr,
     rhs: *Expr,
@@ -241,6 +253,7 @@ pub const Kind = enum {
     forr,
     whil,
     iff,
+    switc,
     
     assignment,
     breaq,
@@ -277,6 +290,7 @@ pub const Expr = struct {
         forr: For,
         whil: While,
         iff: If,
+        switc: Switch,
         
         assignment: Assignment,
         breaq,

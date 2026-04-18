@@ -1,6 +1,6 @@
 fn main() {
     var a: i32
-    var b: char
+    var b: u8
     var c: string
     
     a = 20
