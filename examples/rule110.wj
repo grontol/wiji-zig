@@ -1,4 +1,4 @@
-import "std.wj"
+import "std"
 
 val blocks = .[0] ** 19 ++ .[1]
 val bck_blocks = .[0] ** 20

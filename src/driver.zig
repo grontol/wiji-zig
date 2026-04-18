@@ -136,10 +136,21 @@ pub const Driver = struct {
         for (ast_module.imports) |import| {
             const path_str_with_quote = self.file_manager.getTokenText(import.path);
             const path_str = path_str_with_quote[1..path_str_with_quote.len - 1];
-            const module_dir = std.fs.path.dirname(path) orelse "";
-            const dir = std.fs.cwd().openDir(module_dir, .{}) catch unreachable;
             
-            _ = dir.openFile(path_str, .{}) catch |err| {
+            var parent_dir: []const u8 = undefined;
+            var actual_path_str = path_str;
+            
+            if (std.mem.endsWith(u8, path_str, ".wj")) {
+                parent_dir = std.fs.path.dirname(path) orelse "";
+            }
+            else {
+                parent_dir = "lib";
+                actual_path_str = std.fmt.allocPrint(self.allocator, "{s}.wj", .{path_str}) catch unreachable;
+            }
+            
+            const dir = std.fs.cwd().openDir(parent_dir, .{}) catch unreachable;
+            
+            _ = dir.openFile(actual_path_str, .{}) catch |err| {
                 switch (err) {
                     error.FileNotFound => {
                         self.reporter.reportErrorAtToken(import.path, "Cannot import '{s}', file not found", .{path_str});
@@ -149,8 +160,8 @@ pub const Driver = struct {
             };
             
             const child_path = try std.fs.path.join(self.allocator, &[_][]const u8{
-                module_dir,
-                path_str,
+                parent_dir,
+                actual_path_str,
             });
             
             module.children.put(path_str, try self.loadModule(child_path)) catch unreachable;

@@ -1,5 +1,0 @@
-import "std.wj"
-
-pub fn foo() {
-    printf("Foo inside b\n")
-}

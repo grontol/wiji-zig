@@ -1,4 +1,4 @@
-import "../std.wj"
+import "std"
 
 fn main() {
     one()

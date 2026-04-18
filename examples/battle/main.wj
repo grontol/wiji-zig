@@ -1,5 +1,5 @@
-import "../std.wj"
-import "../raylib.wj"
+import "std"
+import "raylib"
 
 const SCREEN_WIDTH  = 1280
 const SCREEN_HEIGHT = 720

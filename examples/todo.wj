@@ -1,4 +1,4 @@
-import "std.wj"
+import "std"
 
 fn main() {
     const al = ArrayList<i32>.new()

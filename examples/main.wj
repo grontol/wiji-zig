@@ -1,4 +1,4 @@
-import "std.wj"
+import "std"
 
 enum Dir {
     left,
@@ -27,6 +27,7 @@ fn main() {
         switch ch {
             '0'...'9' => printf("Digit\n"),
             'a'...'z' => printf("Alphabet\n"),
+            ' ', '\n' => printf("Space\n"),
             else => printf("Symbol\n")
         }
     }
