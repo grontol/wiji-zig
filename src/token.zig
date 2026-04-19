@@ -84,6 +84,7 @@ pub const TokenKind = enum(u16) {
     IntHexLit,
     FloatLit,
     StringLit,
+    CstringLit,
     CharLit,
     TrueLit,
     FalseLit,

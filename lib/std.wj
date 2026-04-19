@@ -1,22 +1,22 @@
-extern pub fn printf(fmt: string, ...args: any): i32
+extern pub fn printf(fmt: cstring, ...args: any): i32
 extern pub fn malloc(size: usize): voidptr
 extern pub fn realloc(ptr: voidptr, size: usize): voidptr
 extern pub fn memcpy(dest: voidptr, src: voidptr, n: usize): voidptr
 extern pub fn rand(): i32
-extern pub fn strlen(str: string): usize
+extern pub fn strlen(str: cstring): usize
 
 const SEEK_SET = 0
 const SEEK_CUR = 1
 const SEEK_END = 2
 
-extern fn fopen(filename: string, mode: string): voidptr
+extern fn fopen(filename: cstring, mode: cstring): voidptr
 extern fn fclose(stream: voidptr): i32
 extern fn fseek(stream: voidptr, offset: i64, whence: i32): i32
 extern fn ftell(stream: voidptr): i64
 extern fn fread(ptr: voidptr, size: usize, n: usize, stream: voidptr): usize
 
-pub fn readEntireFile(path: string): String {
-    const f = fopen(path, "rb")
+pub fn readEntireFile(path: cstring): String {
+    const f = fopen(path, "rb"c)
     
     fseek(f, 0, SEEK_END)
     const size = ftell(f) as usize
@@ -36,7 +36,7 @@ pub struct String {
     data: *u8
     len: usize
     
-    pub fn fromCString(str: string): @Self {
+    pub fn fromCString(str: cstring): @Self {
         return .{
             data = str,
             len = strlen(str),

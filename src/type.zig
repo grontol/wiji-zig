@@ -50,6 +50,7 @@ pub const TypeKind = enum {
     void,
     numeric,
     string,
+    cstring,
     bool,
     @"enum",
     any,
@@ -201,6 +202,7 @@ pub const Type = struct {
         void,
         numeric: NumericKind,
         string,
+        cstring,
         bool,
         @"enum": TypeEnum,
         any,
@@ -240,7 +242,7 @@ pub const Type = struct {
         if (other.value == TypeKind.unknown) return true;
         if (self.isSame(other)) return true;
         if (self.kind == .voidptr and other.kind == .pointer or self.kind == .pointer and other.kind == .voidptr) return true;
-        if (self.kind == .string and other.kind == .pointer and other.value.pointer.child.isChar()) return true;
+        if (self.kind == .cstring and other.kind == .pointer and other.value.pointer.child.isChar()) return true;
         if (self.kind != other.kind) return false;
         
         switch (self.kind) {
@@ -526,6 +528,7 @@ pub const Type = struct {
             .void,
             .numeric,
             .string,
+            .cstring,
             .bool,
             .@"enum",
             .any,
@@ -641,6 +644,7 @@ pub const Type = struct {
             TypeKind.unknown_enum => { out.appendSlice(allocator, "unknown_enum") catch unreachable; },
             TypeKind.void         => { out.appendSlice(allocator, "void") catch unreachable; },
             TypeKind.string       => { out.appendSlice(allocator, "string") catch unreachable; },
+            TypeKind.cstring      => { out.appendSlice(allocator, "cstring") catch unreachable; },
             TypeKind.bool         => { out.appendSlice(allocator, "bool") catch unreachable; },
             TypeKind.any          => { out.appendSlice(allocator, "any") catch unreachable; },
             TypeKind.range        => { out.appendSlice(allocator, "range") catch unreachable; },
@@ -784,6 +788,7 @@ pub const F64           = &Type{ .size = 8,  .alignment = 8, .type_id = 12, .has
 pub const UNTYPED_INT   = &Type{ .size = 8,  .alignment = 8, .type_id = 13, .hash = 13, .kind = .numeric, .value = .{ .numeric = .untyped_int } };
 pub const UNTYPED_FLOAT = &Type{ .size = 8,  .alignment = 8, .type_id = 14, .hash = 14, .kind = .numeric, .value = .{ .numeric = .untyped_float } };
 pub const STRING        = &Type{ .size = 16, .alignment = 8, .type_id = 15, .hash = 15, .kind = .string,  .value = .string };
+pub const CSTRING       = &Type{ .size = 8,  .alignment = 8, .type_id = 16, .hash = 16, .kind = .cstring, .value = .cstring };
 pub const BOOL          = &Type{ .size = 1,  .alignment = 1, .type_id = 17, .hash = 17, .kind = .bool,    .value = .bool };
 pub const RANGE         = &Type{ .size = 8,  .alignment = 4, .type_id = 18, .hash = 18, .kind = .range,   .value = .range };
 pub const ANY           = &Type{ .size = 8,  .alignment = 8, .type_id = 19, .hash = 19, .kind = .any,     .value = .any };

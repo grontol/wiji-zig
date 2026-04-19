@@ -320,20 +320,22 @@ const Parser = struct {
             TokenKind.IntHexLit,
             TokenKind.FloatLit,
             TokenKind.StringLit,
+            TokenKind.CstringLit,
             TokenKind.CharLit,
             TokenKind.Identifier,
             TokenKind.TrueLit,
             TokenKind.FalseLit => {
                 switch (token.kind) {
-                    TokenKind.IntLit    => { expr = ast.Literal.create_expr(ast.LitKind.Int, self.ts.next()); },
-                    TokenKind.IntBinLit => { expr = ast.Literal.create_expr(ast.LitKind.IntBin, self.ts.next()); },
-                    TokenKind.IntOctLit => { expr = ast.Literal.create_expr(ast.LitKind.IntOct, self.ts.next()); },
-                    TokenKind.IntHexLit => { expr = ast.Literal.create_expr(ast.LitKind.IntHex, self.ts.next()); },
-                    TokenKind.FloatLit  => { expr = ast.Literal.create_expr(ast.LitKind.Float, self.ts.next()); },
-                    TokenKind.StringLit => { expr = ast.Literal.create_expr(ast.LitKind.String, self.ts.next()); },
-                    TokenKind.CharLit   => { expr = ast.Literal.create_expr(ast.LitKind.Char, self.ts.next()); },
-                    TokenKind.TrueLit   => { expr = ast.Literal.create_expr(ast.LitKind.True, self.ts.next()); },
-                    TokenKind.FalseLit  => { expr = ast.Literal.create_expr(ast.LitKind.False, self.ts.next()); },
+                    TokenKind.IntLit     => { expr = ast.Literal.create_expr(ast.LitKind.Int, self.ts.next()); },
+                    TokenKind.IntBinLit  => { expr = ast.Literal.create_expr(ast.LitKind.IntBin, self.ts.next()); },
+                    TokenKind.IntOctLit  => { expr = ast.Literal.create_expr(ast.LitKind.IntOct, self.ts.next()); },
+                    TokenKind.IntHexLit  => { expr = ast.Literal.create_expr(ast.LitKind.IntHex, self.ts.next()); },
+                    TokenKind.FloatLit   => { expr = ast.Literal.create_expr(ast.LitKind.Float, self.ts.next()); },
+                    TokenKind.StringLit  => { expr = ast.Literal.create_expr(ast.LitKind.String, self.ts.next()); },
+                    TokenKind.CstringLit => { expr = ast.Literal.create_expr(ast.LitKind.Cstring, self.ts.next()); },
+                    TokenKind.CharLit    => { expr = ast.Literal.create_expr(ast.LitKind.Char, self.ts.next()); },
+                    TokenKind.TrueLit    => { expr = ast.Literal.create_expr(ast.LitKind.True, self.ts.next()); },
+                    TokenKind.FalseLit   => { expr = ast.Literal.create_expr(ast.LitKind.False, self.ts.next()); },
                     
                     TokenKind.Identifier => {
                         if (self.ts.peekN(2).kind == .Dot and self.ts.peekN(3).kind == .OpenCurlyBracket) {
@@ -383,12 +385,12 @@ const Parser = struct {
                 }
             },
             
-            TokenKind.KeywordFn => expr = self.parseFnDecl(null),
+            TokenKind.KeywordFn => expr = self.parseFnDecl(null, false),
             TokenKind.KeywordStruct => expr = self.parseStructDecl(),
             TokenKind.KeywordEnum => expr = self.parseEnumDecl(),
             TokenKind.KeywordPub => {
                 if (self.hasFnNext()) {
-                    expr = self.parseFnDecl(null);
+                    expr = self.parseFnDecl(null, false);
                 }
                 else if (self.hasVarDeclNext()) {
                     expr = self.parseVarDecl();
@@ -405,7 +407,7 @@ const Parser = struct {
                 const extern_ = self.parseExtern();
                 
                 if (self.hasFnNext()) {
-                    expr = self.parseFnDecl(extern_);
+                    expr = self.parseFnDecl(extern_, false);
                 }
                 else {
                     self.reporter.reportErrorAtToken(extern_token, "extern modifier can only be applied to function", .{});
@@ -442,7 +444,24 @@ const Parser = struct {
                     self.reporter.reportErrorAtToken(self.ts.next(), "Invalid dot", .{});
                 }
             },
-            TokenKind.At => { expr = self.parseIntinsic(); },
+            TokenKind.At => {
+                const peek2 = self.ts.peekN(2);
+                
+                if (std.mem.eql(u8, self.getTokenText(peek2), "builtin")) {
+                    _ = self.ts.next();
+                    _ = self.ts.next();
+                    
+                    if (self.hasFnNext()) {
+                        expr = self.parseFnDecl(null, true);
+                    }
+                    else {
+                        self.reporter.reportErrorAtToken(peek2, "@builtin modifier can only be applied to function", .{});
+                    }
+                }
+                else {
+                    expr = self.parseIntinsic();
+                }
+            },
             TokenKind.KeywordReturn => { expr = self.parseReturn(); },
             TokenKind.Not,
             TokenKind.Minus => { expr = self.parseUnary(); },
@@ -468,7 +487,7 @@ const Parser = struct {
         return expr;
     }
     
-    fn parseFnDecl(self: *Parser, extern_: ?ast.Extern) ast.Expr {
+    fn parseFnDecl(self: *Parser, extern_: ?ast.Extern, builtin: bool) ast.Expr {
         var extern_name: ?[]const u8 = null;
         var extern_abi: ?[]const u8 = null;        
         var public_token: ?Token = null;
@@ -594,6 +613,15 @@ const Parser = struct {
             body = self.parseBlock();
         }
         
+        if (body != null) {
+            if (extern_ != null) {
+                self.reporter.reportErrorAtToken(name_token, "extern function cannot have a body", .{});
+            }
+            else if (builtin) {
+                self.reporter.reportErrorAtToken(name_token, "builtin function cannot have a body", .{});
+            }
+        }
+        
         const start_token = public_token orelse fn_token;
         
         const span = if (extern_) |ext| blk: {
@@ -609,6 +637,7 @@ const Parser = struct {
             .value = .{
                 .fn_decl = .{
                     .is_extern = extern_ != null,
+                    .is_builtin = builtin,
                     .extern_name = extern_name,
                     .extern_abi = extern_abi,
                     .is_public = public_token != null,

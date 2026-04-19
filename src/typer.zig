@@ -14,7 +14,8 @@ const TypedSymbol = @import("symbol.zig").TypedSymbol;
 const Mutability = @import("symbol.zig").Mutability;
 const SymbolManager = @import("symbol.zig").SymbolManager;
 const FileManager = @import("file_manager.zig");
-const Scope =@import("scope.zig").Scope;
+const Scope = @import("scope.zig").Scope;
+const printer = @import("print.zig");
 
 fn doesAllPathHasReturn(block: *const tast.Block) bool {
     for (block.stmts) |stmt| {
@@ -325,7 +326,7 @@ const Typer = struct {
         switch (stmt.value) {
             .var_decl   => |decl|   { return self.typeVarDecl(scope, &decl, stmt.span); },
             .assignment => |ass|    { return self.typeAssignment(scope, &ass); },
-            .fn_call    => |call|   { return self.typeFnCallStmt(scope, &call, stmt.span); },
+            .fn_call    => |call|   { return self.typeFnCall(scope, &call, stmt.span); },
             .returns    => |ret|    { return self.typeReturn(scope, &ret, stmt.span); },
             .iff        => |iff|    { return self.typeIf(scope, &iff); },
             .switc      => |switc|  { return self.typeSwitch(scope, &switc); },
@@ -454,7 +455,7 @@ const Typer = struct {
             type_param_types.items,
             return_typ,
             is_variadic,
-            false,
+            fn_decl.is_builtin,
             fn_decl.type_params.len > 0,
         );
         
@@ -462,6 +463,7 @@ const Typer = struct {
         
         const tast_fn_decl: tast.FnDecl = .{
             .is_extern = fn_decl.is_extern,
+            .is_builtin = fn_decl.is_builtin,
             .extern_name = fn_decl.extern_name,
             .extern_abi = fn_decl.extern_abi,
             .is_public = fn_decl.is_public,
@@ -1114,23 +1116,24 @@ const Typer = struct {
         }};
     }
     
-    fn typeFnCallStmt(self: *Typer, scope: *Scope, call: *const ast.FnCall, span: TokenSpan) tast.Stmt {
-        return .{
-            .fn_call = self.typeFnCall(scope, call, span),
-        };
-    }
-    
     fn typeFnCallExpr(self: *Typer, scope: *Scope, call: *const ast.FnCall, span: TokenSpan) tast.Expr {
-        const tast_call = self.typeFnCall(scope, call, span);
+        const call_stmt = self.typeFnCall(scope, call, span);
         
-        return .{
-            .typ = tast_call.return_typ,
-            .mutability = .constant,
-            .value = .{ .fn_call = tast_call },
-        };
+        if (call_stmt == .fn_call) {
+            const tast_call = call_stmt.fn_call;
+            
+            return .{
+                .typ = tast_call.return_typ,
+                .mutability = .constant,
+                .value = .{ .fn_call = tast_call },
+            };
+        }
+        else {
+            std.debug.panic("TODO: typeFnCallExpr", .{});
+        }
     }
     
-    fn typeFnCall(self: *Typer, scope: *Scope, call: *const ast.FnCall, span: TokenSpan) tast.FnCall {
+    fn typeFnCall(self: *Typer, scope: *Scope, call: *const ast.FnCall, span: TokenSpan) tast.Stmt {
         const callee = self.makeExprPointer(self.typeExpr(scope, call.callee, types.UNKNOWN));
         
         if (callee.typ.kind != types.TypeKind.func) {
@@ -1312,10 +1315,49 @@ const Typer = struct {
             }
         }
         
+        if (callee.typ.value.func.is_builtin) {
+            if (callee.typ.value.func.name) |name| {
+                if (std.mem.eql(u8, name.text, "print")) {
+                    std.debug.assert(typed_args.items.len >= 1);
+                    std.debug.assert(typed_args.items[0].typ.kind == .string);
+                    std.debug.assert(typed_args.items[0].value == .literal);
+                    std.debug.assert(typed_args.items[0].value.literal == .string);
+                    
+                    if (!typed_args.items[0].comptime_known) {
+                        self.reporter.reportErrorAtSpan(call.args[0].span, "The format argument to `print` must be string literal", .{});
+                    }
+                    
+                    const parts = printer.createPrintParts(
+                        self.arena,
+                        self.temp_allocator,
+                        self.reporter,
+                        typed_args.items[0].value.literal.string,
+                        typed_args.items[1..],
+                        call.args[1..],
+                        call.callee.span,
+                    );
+                    
+                    return .{
+                        .expr = .{
+                            .typ = callee.typ,
+                            .mutability = callee.mutability,
+                            .value = .{
+                                .builtin = .{
+                                    .print = parts,
+                                }
+                            }
+                        }
+                    };
+                }
+            }
+        }
+        
         return .{
-            .callee = callee,
-            .args = typed_args.items,
-            .return_typ = return_type,
+            .fn_call = .{
+                .callee = callee,
+                .args = typed_args.items,
+                .return_typ = return_type,
+            }
         };
     }
     
@@ -1864,6 +1906,18 @@ const Typer = struct {
                     .mutability = .constant,
                     .typ = types.STRING,
                     .value = .{ .literal = .{ .string = value } },
+                };
+            },
+            
+            ast.LitKind.Cstring => {
+                const text = self.getTokenText(lit.value);
+                const value = self.arena.dupe(u8, text[1..text.len - 2]) catch unreachable;
+                
+                return tast.Expr{
+                    .comptime_known = true,
+                    .mutability = .constant,
+                    .typ = types.CSTRING,
+                    .value = .{ .literal = .{ .cstring = value } },
                 };
             },
             
@@ -3290,9 +3344,10 @@ const Typer = struct {
         else if (std.mem.eql(u8, typ_text, "f32"))   { return types.F32; }
         else if (std.mem.eql(u8, typ_text, "f64"))   { return types.F64; }
         
-        else if (std.mem.eql(u8, typ_text, "bool"))   { return types.BOOL; }
-        else if (std.mem.eql(u8, typ_text, "string")) { return types.STRING; }
-        else if (std.mem.eql(u8, typ_text, "range"))  { return types.RANGE; }
+        else if (std.mem.eql(u8, typ_text, "bool"))    { return types.BOOL; }
+        else if (std.mem.eql(u8, typ_text, "string"))  { return types.STRING; }
+        else if (std.mem.eql(u8, typ_text, "cstring")) { return types.CSTRING; }
+        else if (std.mem.eql(u8, typ_text, "range"))   { return types.RANGE; }
         
         else if (std.mem.eql(u8, typ_text, "void"))    { return types.VOID; }
         else if (std.mem.eql(u8, typ_text, "any"))     { return types.ANY; }

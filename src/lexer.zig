@@ -4,35 +4,39 @@ const Reporter = @import("reporter.zig");
 const Token = @import("token.zig").Token;
 const TokenKind = @import("token.zig").TokenKind;
 
-const Chars = struct {
+pub const Chars = struct {
     src: []const u8,
     index: usize,
     
-    fn init(src: []const u8) Chars {
+    pub fn init(src: []const u8) Chars {
         return .{
             .src = src,
             .index = 0,
         };
     }
     
-    fn next(self: *Chars) u8 {
+    pub fn hasNext(self: *Chars) bool {
+        return self.index < self.src.len;
+    }
+    
+    pub fn next(self: *Chars) u8 {
         self.index += 1;
         
         if (self.index - 1 >= self.src.len) return 0;
         return self.src[self.index - 1];
     }
     
-    fn peek(self: *const Chars) u8 {
+    pub fn peek(self: *const Chars) u8 {
         if (self.index >= self.src.len) return 0;
         return self.src[self.index];
     }
     
-    fn peekN(self: *const Chars, n: usize) u8 {
+    pub fn peekN(self: *const Chars, n: usize) u8 {
         if (self.index + n - 1 >= self.src.len) return 0;
         return self.src[self.index + n - 1];
     }
     
-    fn nextUntilSeparateToken(self: *Chars) usize {
+    pub fn nextUntilSeparateToken(self: *Chars) usize {
         var ch = self.peek();
         
         while (ch > 0) : (ch = self.peek()) {
@@ -43,7 +47,7 @@ const Chars = struct {
         return self.index;
     }
     
-    fn nextNumericUntilSeparateToken(self: *Chars) usize {
+    pub fn nextNumericUntilSeparateToken(self: *Chars) usize {
         var ch = self.peek();
         
         while (ch > 0) : (ch = self.peek()) {
@@ -54,7 +58,7 @@ const Chars = struct {
         return self.index;
     }
     
-    fn nextNumericBinUntilSeparateToken(self: *Chars) usize {
+    pub fn nextNumericBinUntilSeparateToken(self: *Chars) usize {
         var ch = self.peek();
         
         while (ch > 0) : (ch = self.peek()) {
@@ -65,7 +69,7 @@ const Chars = struct {
         return self.index;
     }
     
-    fn nextNumericOctUntilSeparateToken(self: *Chars) usize {
+    pub fn nextNumericOctUntilSeparateToken(self: *Chars) usize {
         var ch = self.peek();
         
         while (ch > 0) : (ch = self.peek()) {
@@ -76,7 +80,7 @@ const Chars = struct {
         return self.index;
     }
     
-    fn nextNumericHexUntilSeparateToken(self: *Chars) usize {
+    pub fn nextNumericHexUntilSeparateToken(self: *Chars) usize {
         var ch = self.peek();
         
         while (ch > 0) : (ch = self.peek()) {
@@ -87,19 +91,19 @@ const Chars = struct {
         return self.index;
     }
     
-    fn isAlpha(ch: u8) bool {
+    pub fn isAlpha(ch: u8) bool {
         return (ch >= 'a' and ch <= 'z') or (ch >= 'A' and ch <= 'Z');
     }
     
-    fn isNumeric(ch: u8) bool {
+    pub fn isNumeric(ch: u8) bool {
         return ch >= '0' and ch <= '9';
     }
     
-    fn isNumericHex(ch: u8) bool {
+    pub fn isNumericHex(ch: u8) bool {
         return (ch >= '0' and ch <= '9') or (ch >= 'a' and ch <= 'f') or (ch >= 'A' and ch <= 'F');
     }
     
-    fn isAlphanumeric(ch: u8) bool {
+    pub fn isAlphanumeric(ch: u8) bool {
         return isAlpha(ch) or isNumeric(ch);
     }
 };
@@ -284,7 +288,13 @@ const Lexer = struct {
         }
         
         if (closed) {
-            self.pushToken(.StringLit, start, end);
+            if (self.chs.peek() == 'c') {
+                _ = self.chs.next();
+                self.pushToken(.CstringLit, start, end + 1);
+            }
+            else {
+                self.pushToken(.StringLit, start, end);
+            }
         }
         else {
             self.reporter.reportErrorAtPos(self.file_id, self.line, self.col, start, end - start, "Unclosed string literal", .{});

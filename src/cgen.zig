@@ -151,7 +151,7 @@ const Cgen = struct {
         self.write("typedef int64_t  i64;\n");
         self.write("typedef float    f32;\n");
         self.write("typedef double   f64;\n");
-        self.write("typedef const char* string;\n\n");
+        self.write("typedef struct {{ const char* ptr; size_t len; }} string;\n\n");
         
         self.genModule(module);
         
@@ -194,7 +194,10 @@ const Cgen = struct {
         var should_create_impl = true;
         
         if (fn_decl.is_extern) {
-            // should_create_decl = !std.mem.eql(u8, fn_decl.name.text, "printf");
+            should_create_impl = false;
+        }
+        else if (fn_decl.is_builtin) {
+            should_create_decl = false;
             should_create_impl = false;
         }
         else {
@@ -247,9 +250,14 @@ const Cgen = struct {
                     self.write(", ");
                 }
                 
-                self.genType(param.typ);
-                self.write(" ");
-                self.writeSymbol(param.name);
+                if (param.is_variadic) {
+                    self.write("...");
+                }
+                else {
+                    self.genType(param.typ);
+                    self.write(" ");
+                    self.writeSymbol(param.name);
+                }
             }
             
             self.write(") ");
@@ -281,6 +289,7 @@ const Cgen = struct {
             .for_each   => |for_each|  { self.genForEach(&for_each); has_semicolon = false; },
             .block      => |block|     { self.genBlock(&block, dont_create_block); has_semicolon = false; has_newline = false; },
             .breaq      => |_|         { self.genBreak(); },
+            .expr       => |expr|      { self.genExpr(&expr); },
             
             else => {
                 std.debug.panic("TODO: genStmt {s}", .{@tagName(stmt.*)});
@@ -633,7 +642,8 @@ const Cgen = struct {
             .bool   => self.writeArgs("{}", .{lit.bool}),
             .int    => self.writeArgs("{}", .{lit.int}),
             .float  => self.writeArgs("{}", .{lit.float}),
-            .string => self.writeArgs("\"{s}\"", .{lit.string}),
+            .string => self.writeArgs("((string){{ .ptr = \"{s}\", .len = {} }})", .{lit.string, lit.string.len}),
+            .cstring => self.writeArgs("\"{s}\"", .{lit.cstring}),
             .char   => {
                 switch (lit.char) {
                     '\n' => self.write("'\\n'"),
@@ -722,6 +732,17 @@ const Cgen = struct {
     
     fn genBuiltin(self: *Cgen, builtin: *const tast.Builtin, args: []const tast.Expr) void {
         switch (builtin.*) {
+            .str_len => {
+                self.genExpr(builtin.str_len.str);
+                if (builtin.str_len.is_reference) {
+                    self.write("->");
+                }
+                else {
+                    self.write(".");
+                }
+                
+                self.write("len");
+            },
             .array_len => {
                 self.genExpr(builtin.array_len.arr);
                 if (builtin.array_len.is_reference) {
@@ -784,7 +805,52 @@ const Cgen = struct {
                 self.genExpr(builtin.dynarray_to_array.arr);
                 self.write(".len }})");
             },
+            
+            .print => {
+                self.genPrint(builtin.print);
+            },
         }
+    }
+    
+    fn genPrint(self: *Cgen, parts: []const tast.PrintPart) void {
+        var fmt = std.ArrayList(u8).empty;
+        defer fmt.deinit(self.allocator);
+        
+        var args = std.ArrayList(*const tast.Expr).empty;
+        defer args.deinit(self.allocator);
+        
+        for (parts) |part| {
+            switch (part) {
+                .literal => {
+                    fmt.appendSlice(self.allocator, part.literal) catch unreachable;
+                },
+                .value => {
+                    var format: []const u8 = undefined;
+                    
+                    switch (part.value.format) {
+                        .int    => format = "%d",
+                        .float  => format = "%f",
+                        .string => format = "%.*s",
+                        .char   => format = "%c",
+                    }
+                    
+                    fmt.appendSlice(self.allocator, format) catch unreachable;
+                    args.append(self.allocator, part.value.expr) catch unreachable;
+                },
+                .additional => {
+                    args.append(self.allocator, part.additional) catch unreachable;
+                }
+            }
+        }
+        
+        self.writeArgs("printf(\"{s}\"", .{fmt.items});
+        
+        for (args.items) |arg| {
+            self.write(", ");
+            self.genExpr(arg);
+        }
+        
+        self.write(")");
     }
     
     fn genStructValue(self: *Cgen, val: *const tast.StructValue, typ: *const Type) void {
@@ -860,6 +926,10 @@ const Cgen = struct {
             .string,
             .void => {
                 typ.getText(self.cur_src, self.allocator);
+                return;
+            },
+            .cstring => {
+                self.write("const char*");
                 return;
             },
             .numeric => {

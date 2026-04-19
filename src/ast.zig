@@ -63,6 +63,7 @@ pub const VarDecl = struct {
 
 pub const FnDecl = struct {
     is_extern: bool,
+    is_builtin: bool,
     extern_name: ?[]const u8,
     extern_abi: ?[]const u8,
     is_public: bool,
@@ -224,6 +225,7 @@ pub const LitKind = enum {
     IntHex,
     Float,
     String,
+    Cstring,
     Char,
     True,
     False,

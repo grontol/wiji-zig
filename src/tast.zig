@@ -62,6 +62,7 @@ pub const FnParam = struct {
 
 pub const FnDecl = struct {
     is_extern: bool,
+    is_builtin: bool,
     extern_name: ?[]const u8,
     extern_abi: ?[]const u8,
     is_public: bool,
@@ -195,7 +196,7 @@ pub const StructValue = struct {
 };
 
 pub const StructMember = struct {
-    callee: *Expr,
+    callee: *const Expr,
     member_index: usize,
 };
 
@@ -219,6 +220,7 @@ pub const LiteralKind = enum {
     int,
     float,
     string,
+    cstring,
     char,
     bool,
 };
@@ -227,6 +229,7 @@ pub const Literal = union(LiteralKind) {
     int: u64,
     float: f64,
     string: []const u8,
+    cstring: []const u8,
     char: u8,
     bool: bool,
 };
@@ -252,14 +255,43 @@ pub const StringConcat = struct {
 };
 
 pub const BuiltinKind = enum {
+    str_len,
     array_len,
     array_ptr,
     dynarray_cap,
     dynarray_append,
     dynarray_to_array,
+    
+    print,
+};
+
+pub const PrintFormat = enum {
+    int,
+    float,
+    string,
+    char,
+};
+
+pub const PrintPartKind = enum {
+    literal,
+    value,
+    additional,
+};
+
+pub const PrintPart = union(PrintPartKind) {
+    literal: []const u8,
+    value: struct {
+        format: PrintFormat,
+        expr: *const Expr,
+    },
+    additional: *const Expr,
 };
 
 pub const Builtin = union(BuiltinKind) {
+    str_len: struct {
+        str: *const Expr,
+        is_reference: bool,
+    },
     array_len: struct {
         arr: *Expr,
         is_reference: bool,
@@ -281,6 +313,8 @@ pub const Builtin = union(BuiltinKind) {
         is_reference: bool,
         dest_typ: *const Type,
     },
+    
+    print: []const PrintPart,
 };
 
 pub const StmtKind = enum {
@@ -748,6 +782,7 @@ pub const Printer = struct {
             .int => |v| { self.print("{}", .{v}); },
             .float => |v| { self.print("{}", .{v}); },
             .string => |v| { self.print("\"{s}\"", .{v}); },
+            .cstring => |v| { self.print("\"{s}\"c", .{v}); },
             .char => |v| {
                 const ch = switch (v) {
                     '\n' => "\\n",
