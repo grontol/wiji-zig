@@ -3,22 +3,22 @@ struct Foo {
     
     fn foo() {
         Bar.foo()
-        printf("Foo foo\n")
+        print("Foo foo\n")
     }
     
     fn bar() {
-        printf("Foo bar\n")
+        print("Foo bar\n")
     }
 }
 
 struct Bar {
     fn foo() {
-        printf("Bar foo\n")
+        print("Bar foo\n")
     }
     
     fn bar() {
         Foo.bar()
-        printf("Bar bar\n")
+        print("Bar bar\n")
         
         E1.foo()
     }
@@ -26,14 +26,14 @@ struct Bar {
 
 enum E1 {
     fn foo() {
-        printf("E1 foo\n")
+        print("E1 foo\n")
         E2.foo()
     }
 }
 
 enum E2 {
     fn foo() {
-        printf("E2 foo\n")
+        print("E2 foo\n")
         Foo.foo()
         Foo.bar()
     }
@@ -46,7 +46,7 @@ fn main() {
     E1.foo()
 }
 
-extern fn printf(fmt: string, ...args: any)
+@builtin fn print(fmt: string, ...args: any)
 
 /***
 Bar foo

@@ -83,10 +83,6 @@ pub const FmtPrinter = struct {
         self.cur_str.clearRetainingCapacity();
     }
     
-    fn pushAdditional(self: *FmtPrinter, expr: *const tast.Expr) void {
-        self.parts.append(self.temp_allocator, .{.additional = expr}) catch unreachable;
-    }
-    
     fn pushValue(self: *FmtPrinter, fmt: tast.PrintFormat, expr: *const tast.Expr) void {
         self.parts.append(self.temp_allocator, .{.value = .{
             .format = fmt,
@@ -167,16 +163,11 @@ pub const FmtPrinter = struct {
                     self.pushValue(.int, expr);
                 }
             },
-            .string => {
-                const str_len: tast.Expr = .{
-                    .comptime_known = expr.comptime_known,
-                    .mutability = .immutable,
-                    .typ = types.USize,
-                    .value = .{ .builtin = .{ .str_len = .{ .str = expr, .is_reference = false } } },
-                };
-                
-                self.pushAdditional(self.makeExprPointer(str_len));
+            .string => {                
                 self.pushValue(.string, expr);
+            },
+            .bool => {
+                self.pushValue(.bool, expr);
             },
             .@"struct" => {
                 self.pushStructValue(expr, pretty);

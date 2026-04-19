@@ -3,16 +3,16 @@ const FOO = Foo.{10}
 struct Foo {
     x: i32
     
-    fn print(self: @Self) {
-        printf("x = %d\n", self.x)
+    fn prints(self: @Self) {
+        print("x = {}\n", self.x)
     }
 }
 
 fn main() {
-    FOO.print()
+    FOO.prints()
 }
 
-extern fn printf(fmt: string, ...args: any)
+@builtin fn print(fmt: string, ...args: any)
 
 /***
 x = 10

@@ -7,10 +7,10 @@ struct Point {
 fn main() {
     const p = Point.{10, 20}
     
-    printf("x = %d, y = %d, z = %d\n", p.x, p.y, p.z)
+    print("x = {}, y = {}, z = {}\n", p.x, p.y, p.z)
 }
 
-extern fn printf(fmt: string, ...args: any)
+@builtin fn print(fmt: string, ...args: any)
 
 /***
 x = 10, y = 20, z = 30

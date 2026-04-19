@@ -2,7 +2,7 @@ struct Object {
     name = "OBJECT"
     
     fn toString(self: &Object) {
-        printf("name = %s\n", self.name)
+        print("name = {}\n", self.name)
     }
 }
 
@@ -12,7 +12,7 @@ struct Entity {
     using obj: Object = .{}
     
     fn draw(self: &Entity) {
-        printf("Entity: x = %d, y = %d, name = %s\n", self.x, self.y, self.name)
+        print("Entity: x = {}, y = {}, name = {}\n", self.x, self.y, self.name)
     }
 }
 
@@ -47,14 +47,14 @@ fn main() {
     p.toString()
     
     p.name = "SOOOOO"
-    printf("Name = %s\n", p.name)
+    print("Name = {}\n", p.name)
     
     const e = Enemy.new()
     e.draw()
     e.toString()
 }
 
-extern fn printf(fmt: string, ...args: any)
+@builtin fn print(fmt: string, ...args: any)
 
 /***
 Entity: x = 10, y = 20, name = OBJECT

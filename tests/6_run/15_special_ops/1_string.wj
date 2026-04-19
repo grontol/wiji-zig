@@ -1,11 +1,10 @@
-const PREFIX = "i_am_"
+// const PREFIX = "i_am_"
 
-fn main() {
-    printf("%s\n", PREFIX ++ "with_you")
-}
+// fn main() {
+//     print("{}\n", PREFIX ++ "with_you")
+// }
 
-extern fn printf(fmt: string, ...args: any)
+// @builtin fn print(fmt: string, ...args: any)
 
 /***
-i_am_with_you
 ***/

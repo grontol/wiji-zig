@@ -8,11 +8,11 @@ struct Point {
         self.y += 1
         self.z += 1
         
-        self.print()
+        self.prints()
     }
     
-    fn print(self: Point) {
-        printf("x = %d, y = %d, z = %d\n", self.x, self.y, self.z)
+    fn prints(self: Point) {
+        print("x = {}, y = {}, z = {}\n", self.x, self.y, self.z)
     }
 }
 
@@ -21,7 +21,7 @@ fn main() {
     p.incAndPrint()
 }
 
-extern fn printf(fmt: string, ...args: any)
+@builtin fn print(fmt: string, ...args: any)
 
 /***
 x = 11, y = 21, z = 31

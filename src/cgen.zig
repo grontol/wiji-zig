@@ -139,6 +139,7 @@ const Cgen = struct {
         self.write("#include <stdint.h>\n");
         self.write("#include <stdbool.h>\n");
         self.write("#include <stddef.h>\n");
+        self.write("int printf(const char* fmt, ...);\n");
         
         self.setToTypedef();
         self.write("typedef uint8_t  u8;\n");
@@ -177,7 +178,7 @@ const Cgen = struct {
         for (module.var_decls) |var_decl| {
             self.genVarDecl(&var_decl, true);
             
-            if (var_decl.kind != .Const) {
+            if (var_decl.kind != .Const or !var_decl.typ.isConstable()) {
                 self.write(";");
             }
             
@@ -331,7 +332,7 @@ const Cgen = struct {
     }
     
     fn genVarDecl(self: *Cgen, decl: *const tast.VarDecl, is_top_level: bool) void {
-        if (is_top_level and decl.kind == .Const) {
+        if (is_top_level and decl.kind == .Const and decl.typ.isConstable()) {
             std.debug.assert(decl.value != null);
             
             self.write("#define ");
@@ -577,7 +578,7 @@ const Cgen = struct {
             .array => self.writeArgs("for (int {[index_var]s} = 0; {[index_var]s} < {[iter_var]s}.len; {[index_var]s}++) ", .{
                 .index_var = index_var_name, .iter_var = iter_name
             }),
-            .string => self.writeArgs("for (int {[index_var]s} = 0; {[index_var]s} < strlen({[iter_var]s}); {[index_var]s}++) ", .{
+            .string => self.writeArgs("for (int {[index_var]s} = 0; {[index_var]s} < {[iter_var]s}.len; {[index_var]s}++) ", .{
                 .index_var = index_var_name, .iter_var = iter_name
             }),
         }
@@ -596,7 +597,7 @@ const Cgen = struct {
             
             switch (for_each.kind) {
                 .array  => self.writeArgs("{s}.ptr[{s}];\n", .{iter_name, index_var_name}),
-                .string => self.writeArgs("{s}[{s}];\n", .{iter_name, index_var_name}),
+                .string => self.writeArgs("{s}.ptr[{s}];\n", .{iter_name, index_var_name}),
             }
         }
         
@@ -816,7 +817,20 @@ const Cgen = struct {
         var fmt = std.ArrayList(u8).empty;
         defer fmt.deinit(self.allocator);
         
-        var args = std.ArrayList(*const tast.Expr).empty;
+        var tmp = std.ArrayList(u8).empty;
+        defer tmp.deinit(self.allocator);
+        
+        const ArgKind = enum {
+            hidden_var,
+            expr,
+        };
+        
+        const Arg = union(ArgKind) {
+            hidden_var: usize,
+            expr: *const tast.Expr,
+        };
+        
+        var args = std.ArrayList(Arg).empty;
         defer args.deinit(self.allocator);
         
         for (parts) |part| {
@@ -832,14 +846,24 @@ const Cgen = struct {
                         .float  => format = "%f",
                         .string => format = "%.*s",
                         .char   => format = "%c",
+                        .bool   => format = "%d",
                     }
                     
                     fmt.appendSlice(self.allocator, format) catch unreachable;
-                    args.append(self.allocator, part.value.expr) catch unreachable;
+                    
+                    if (part.value.format == .string) {
+                        self.writeArgs("string __XX_{} = ", .{self.hidden_var_index});
+                        self.genExpr(part.value.expr);
+                        self.write(";\n");
+                        self.writeIndent();
+                        
+                        args.append(self.allocator, .{ .hidden_var = self.hidden_var_index }) catch unreachable;
+                        self.hidden_var_index += 1;
+                    }
+                    else {
+                        args.append(self.allocator, .{ .expr = part.value.expr }) catch unreachable;
+                    }
                 },
-                .additional => {
-                    args.append(self.allocator, part.additional) catch unreachable;
-                }
             }
         }
         
@@ -847,7 +871,13 @@ const Cgen = struct {
         
         for (args.items) |arg| {
             self.write(", ");
-            self.genExpr(arg);
+            
+            switch (arg) {
+                .expr => self.genExpr(arg.expr),
+                .hidden_var => {
+                    self.writeArgs("__XX_{}.len, __XX_{}.ptr", .{arg.hidden_var, arg.hidden_var});
+                },
+            }
         }
         
         self.write(")");

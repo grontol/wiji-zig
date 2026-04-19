@@ -3,10 +3,10 @@ const Y = 20 + Z
 const Z = 10
 
 fn main() {
-    printf("X = %d\n", X)
+    print("X = {}\n", X)
 }
 
-extern fn printf(fmt: string, ...args: any)
+@builtin fn print(fmt: string, ...args: any)
 
 /***
 X = 30

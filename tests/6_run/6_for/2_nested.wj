@@ -2,41 +2,41 @@ fn main() {
     val y = 7
 
     if y < 10 {
-        printf("< 10\n")
+        print("< 10\n")
 
         for a in 0..y {
-            printf("%d -> ", a)
+            print("{} -> ", a)
 
-            if a % 2 == 0 printf("Genap\n")
-            else printf("Ganjil\n")
+            if a % 2 == 0 print("Genap\n")
+            else print("Ganjil\n")
 
             for b in a {
-                printf("%d\n", b + 1)
+                print("{}\n", b + 1)
                 
                 for c in b {
-                    if c % 2 == 0 printf ("  xxx ")
-                    else printf("  ")
+                    if c % 2 == 0 print ("  xxx ")
+                    else print("  ")
                     
-                    printf("  %d\n", c + 1)
+                    print("  {}\n", c + 1)
                 }
             }
         }
 
         if false {
-            printf("True\n")
+            print("True\n")
         }
         else {
-            printf("False\n")
+            print("False\n")
         }
     }
     else if y > 10 {
-        printf("> 10\n")
+        print("> 10\n")
     }
     else {
-        printf("= 10\n")
+        print("= 10\n")
 
         for a in y..y + 3 {
-            printf("%d\n", a * 10)
+            print("{}\n", a * 10)
         }
     }
 
@@ -44,41 +44,41 @@ fn main() {
     val z = 3
 
     if x < 4 {
-        printf("x < 4\n")
+        print("x < 4\n")
 
-        if z < 4 printf("1 y < 4\n")
-        else if z > 4 printf("1 y > 4\n")
-        else printf("1 y == 4\n")
+        if z < 4 print("1 y < 4\n")
+        else if z > 4 print("1 y > 4\n")
+        else print("1 y == 4\n")
     }
     else if x > 4 {
-        printf("x > 4\n")
+        print("x > 4\n")
 
-        if z < 4 printf("2 y < 4\n")
-        else if z > 4 printf("2 y > 4\n")
-        else printf("2 y == 4\n")
+        if z < 4 print("2 y < 4\n")
+        else if z > 4 print("2 y > 4\n")
+        else print("2 y == 4\n")
     }
     else {
-        printf("x == 4\n")
+        print("x == 4\n")
 
-        if z < 4 printf("3 y < 4\n")
-        else if z > 4 printf("3 y > 4\n")
-        else printf("3 y == 4\n")
+        if z < 4 print("3 y < 4\n")
+        else if z > 4 print("3 y > 4\n")
+        else print("3 y == 4\n")
     }
     
-    printf("\n-----------------------\n")
+    print("\n-----------------------\n")
     
     for a in 10 {
-        for a + 1 printf("*")
+        for a + 1 print("*")
         
-        printf("\n")
+        print("\n")
     }
     
-    printf("-----------------------\n")
+    print("-----------------------\n")
 
-    printf("Done\n")
+    print("Done\n")
 }
 
-extern fn printf(fmt: string, ...values: any)
+@builtin fn print(fmt: string, ...values: any)
 
 /***
 < 10

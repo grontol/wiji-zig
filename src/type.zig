@@ -632,6 +632,22 @@ pub const Type = struct {
         return self.kind == .numeric and self.value.numeric == .u8;
     }
     
+    pub fn isConstable(self: *const Type) bool {
+        switch (self.kind) {
+            TypeKind.numeric,
+            TypeKind.bool,
+            TypeKind.@"enum",
+            TypeKind.cstring,
+            TypeKind.void,
+            TypeKind.voidptr => {
+                return true;
+            },
+            else => {
+                return false;
+            }
+        }
+    }
+    
     pub fn getTextLeak(self: *const Type, allocator: std.mem.Allocator) []const u8 {
         var str = std.ArrayList(u8).empty;
         self.getText(&str, allocator);

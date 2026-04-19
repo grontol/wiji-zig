@@ -4,43 +4,43 @@ fn main() {
     {
         var a = 0
         while a < t {
-            printf("%d\n", a)
+            print("{}\n", a)
             a += 1
         }
     }
     
-    printf("\n")
+    print("\n")
     
     {
         var a = t
         while a > 0 {
-            printf("%d\n", a)
+            print("{}\n", a)
             a -= 1
         }
     }
     
-    printf("\n")
+    print("\n")
 
     {
         var a = 0
         while a < t * 2 {
-            printf("%d\n", a)
+            print("{}\n", a)
             a += 2
         }
     }
     
-    printf("\n")
+    print("\n")
     
     {
         var a = t * 2
         while a > 0 {
-            printf("%d\n", a)
+            print("{}\n", a)
             a -= 2
         }
     }
 }
 
-extern fn printf(fmt: string, ...values: any)
+@builtin fn print(fmt: string, ...values: any)
 
 /***
 0

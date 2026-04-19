@@ -5,10 +5,10 @@ struct Foo {
 }
 
 fn main() {
-    printf("X = %d\n", Foo.X)
+    print("X = {}\n", Foo.X)
 }
 
-extern fn printf(fmt: string, ...args: any)
+@builtin fn print(fmt: string, ...args: any)
 
 /***
 X = 30

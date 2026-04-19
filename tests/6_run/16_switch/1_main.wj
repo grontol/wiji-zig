@@ -1,37 +1,37 @@
-import "std"
-
 enum Dir {
     left,
     right,
     up,
     down,
     
-    fn print(self: @Self) {
+    fn prints(self: @Self) {
         switch self @partial {
-            .up, .down @fallthrough => printf("Up or Down\n"),
+            .up, .down @fallthrough => print("Up or Down\n"),
             .left  => {
-                printf("Left\n")
+                print("Left\n")
             },
         }
     }
 }
 
 fn main() {
-    Dir.right.print()
+    Dir.right.prints()
     
     const s = "ASCII (American Standard Code for Information Interchange) is a 7-bit character"
     
     for ch in s {
-        printf("%c => ", ch)
+        print("{:c} => ", ch)
         
         switch ch {
-            '0'...'9' => printf("Digit\n"),
-            'a'...'z' => printf("Alphabet\n"),
-            ' ', '\n' => printf("Space\n"),
-            else => printf("Symbol\n")
+            '0'...'9' => print("Digit\n"),
+            'a'...'z' => print("Alphabet\n"),
+            ' ', '\n' => print("Space\n"),
+            else => print("Symbol\n")
         }
     }
 }
+
+@builtin fn print(fmt: string, ...args: any)
 
 /***
 A => Symbol

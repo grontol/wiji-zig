@@ -3,10 +3,10 @@ fn main() {
 }
 
 fn foo(x: i32) {
-    printf("Foo %d\n", x)
+    print("Foo {}\n", x)
 }
 
-extern fn printf(fmt: string, ...values: any)
+@builtin fn print(fmt: string, ...values: any)
 
 /***
 Foo 0

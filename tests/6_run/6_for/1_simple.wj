@@ -2,21 +2,21 @@ fn main() {
     val x = 3
     
     for a in 0..x {
-        printf("%d\n", a)
+        print("{}\n", a)
     }
     
-    printf("\n")
-    for a in 0..x printf("%d\n", a)
-    printf("\n")
-    for a in x printf("%d\n", a)
-    printf("\n")
-    for x printf("x\n")
-    printf("\n")
-    for 3 printf("?\n")
-//    for 10 printf("x\n")
+    print("\n")
+    for a in 0..x print("{}\n", a)
+    print("\n")
+    for a in x print("{}\n", a)
+    print("\n")
+    for x print("x\n")
+    print("\n")
+    for 3 print("?\n")
+//    for 10 print("x\n")
 }
 
-extern fn printf(fmt: string, ...values: any)
+@builtin fn print(fmt: string, ...values: any)
 
 /***
 0

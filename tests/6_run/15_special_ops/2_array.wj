@@ -4,19 +4,19 @@ const BAZ = .[0, 1] ++ .[2, 3]
 
 fn main() {
     for f in FOO {
-        printf("%d\n", f)
+        print("{}\n", f)
     }
     
     for b in BAR {
-        printf("%d\n", b)
+        print("{}\n", b)
     }
     
     for b in BAZ {
-        printf("%d\n", b)
+        print("{}\n", b)
     }
 }
 
-extern fn printf(fmt: string, ...args: any)
+@builtin fn print(fmt: string, ...args: any)
 
 /***
 1

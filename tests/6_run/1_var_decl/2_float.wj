@@ -2,13 +2,13 @@ fn main() {
     val x = 1.23
     val y = 2.345678
     
-    printf("%.*f\n", 2, x)
-    printf("%.*f\n", 6, y)
+    print("{}\n", x)
+    print("{}\n", y)
 }
 
-extern fn printf(fmt: string, ...values: any)
+@builtin fn print(fmt: string, ...values: any)
 
 /***
-1.23
+1.230000
 2.345678
 ***/

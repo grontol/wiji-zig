@@ -6,10 +6,10 @@ struct Foo {
         
         fn foo(self: @Self) {
             if self == .one {
-                printf("is one\n")
+                print("is one\n")
             }
             else {
-                printf("is two\n")
+                print("is two\n")
             }
         }
     }
@@ -24,7 +24,7 @@ fn main() {
     f.kind.foo()
 }
 
-extern fn printf(fmt: string, ...args: any)
+@builtin fn print(fmt: string, ...args: any)
 
 /***
 is two

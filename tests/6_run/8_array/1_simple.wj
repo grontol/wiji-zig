@@ -1,11 +1,11 @@
 fn main() {
     val a = .[1, 2]
     
-    printf("a[0] -> %d\n", a[0])
-    printf("a[1] -> %d\n", a[1])
+    print("a[0] -> {}\n", a[0])
+    print("a[1] -> {}\n", a[1])
 }
 
-extern fn printf(fmt: string, ...values: any)
+@builtin fn print(fmt: string, ...values: any)
 
 /***
 a[0] -> 1

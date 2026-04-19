@@ -2,7 +2,7 @@ struct Foo {
     x: i32
     
     fn foo(self: @Self) {
-        printf("x = %d\n", self.x)
+        print("x = {}\n", self.x)
     }
 }
 
@@ -10,12 +10,12 @@ enum Kind {
     one,
     two,
     
-    fn print(self: @Self) {
+    fn prints(self: @Self) {
         if self == .one {
-            printf("is one\n")
+            print("is one\n")
         }
         else {
-            printf("is two\n")
+            print("is two\n")
         }
     }
 }
@@ -25,13 +25,13 @@ fn main() {
     f.foo()
     
     var k = Kind.one
-    k.print()
+    k.prints()
     
     k = .two
-    k.print()
+    k.prints()
 }
 
-extern fn printf(fmt: string, ...args: any)
+@builtin fn print(fmt: string, ...args: any)
 
 /***
 x = 10

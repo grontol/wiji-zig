@@ -4,12 +4,12 @@ enum Kind {
     player,
     enemy,
     
-    fn print(self: Kind, name: string) {
+    fn prints(self: Kind, name: string) {
         if self == .player {
-            printf("%s%s is player\n", PREFIX, name)
+            print("{}{} is player\n", PREFIX, name)
         }
         else if self == .enemy {
-            printf("%s%s is enemy\n", PREFIX, name)
+            print("{}{} is enemy\n", PREFIX, name)
         }
     }
 }
@@ -18,11 +18,11 @@ fn main() {
     const p = Kind.player
     const e: Kind = .enemy
     
-    p.print("p")
-    e.print("e")
+    p.prints("p")
+    e.prints("e")
 }
 
-extern fn printf(fmt: string, ...args: any)
+@builtin fn print(fmt: string, ...args: any)
 
 /***
 YOYOYO => p is player

@@ -11,11 +11,11 @@ struct Bar {
 }
 
 fn main() {
-    printf("Foo.X = %d\n", Foo.X)
-    printf("Bar.X = %d\n", Bar.X)
+    print("Foo.X = {}\n", Foo.X)
+    print("Bar.X = {}\n", Bar.X)
 }
 
-extern fn printf(fmt: string, ...args: any)
+@builtin fn print(fmt: string, ...args: any)
 
 /***
 Foo.X = 30

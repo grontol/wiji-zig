@@ -270,12 +270,12 @@ pub const PrintFormat = enum {
     float,
     string,
     char,
+    bool,
 };
 
 pub const PrintPartKind = enum {
     literal,
     value,
-    additional,
 };
 
 pub const PrintPart = union(PrintPartKind) {
@@ -284,7 +284,6 @@ pub const PrintPart = union(PrintPartKind) {
         format: PrintFormat,
         expr: *const Expr,
     },
-    additional: *const Expr,
 };
 
 pub const Builtin = union(BuiltinKind) {

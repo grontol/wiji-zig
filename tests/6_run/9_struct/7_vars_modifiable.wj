@@ -12,7 +12,7 @@ struct Point {
         self.y += INC
         self.z += INC
         
-        self.print()
+        self.prints()
     }
     
     fn timesAndPrint(self: &Point) {
@@ -20,13 +20,13 @@ struct Point {
         self.y *= times
         self.z *= times
         
-        self.print()
+        self.prints()
         
         times += 1
     }
     
-    fn print(self: Point) {
-        printf("x = %d, y = %d, z = %d\n", self.x, self.y, self.z)
+    fn prints(self: Point) {
+        print("x = {}, y = {}, z = {}\n", self.x, self.y, self.z)
     }
 }
 
@@ -38,7 +38,7 @@ fn main() {
     p.timesAndPrint()
 }
 
-extern fn printf(fmt: string, ...args: any)
+@builtin fn print(fmt: string, ...args: any)
 
 /***
 x = 20, y = 30, z = 40

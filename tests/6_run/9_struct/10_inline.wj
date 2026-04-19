@@ -5,7 +5,7 @@ struct Foo {
         z: i32
         
         fn barz(self: @Self) {
-            printf("y = %d, z = %d\n", self.y, self.z)
+            print("y = {}, z = {}\n", self.y, self.z)
         }
     }
 }
@@ -19,7 +19,7 @@ fn main() {
     f.barz()
 }
 
-extern fn printf(fmt: string, ...args: any)
+@builtin fn print(fmt: string, ...args: any)
 
 /***
 y = 10, z = 20

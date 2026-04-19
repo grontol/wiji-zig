@@ -3,11 +3,11 @@ fn main() {
     val a = .[x * 2, x * 3, x * x + 34, 130 / x]
     
     for i in 0..4 {
-        printf("a[%d] -> %d\n", i, a[i])
+        print("a[{}] -> {}\n", i, a[i])
     }
 }
 
-extern fn printf(fmt: string, ...values: any)
+@builtin fn print(fmt: string, ...values: any)
 
 /***
 a[0] -> 20

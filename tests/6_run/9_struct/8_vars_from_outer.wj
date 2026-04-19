@@ -7,8 +7,8 @@ struct Point {
     
     const INC = 10
     
-    fn print(self: Point) {
-        printf("x = %d, y = %d, z = %d\n", self.x, self.y, self.z)
+    fn prints(self: Point) {
+        print("x = {}, y = {}, z = {}\n", self.x, self.y, self.z)
     }
 }
 
@@ -18,21 +18,21 @@ fn main() {
     p.x *= Point.times
     p.y *= Point.times
     p.z *= Point.times
-    p.print()
+    p.prints()
     
     Point.times += 1
     p.x *= Point.times
     p.y *= Point.times
     p.z *= Point.times
-    p.print()
+    p.prints()
     
     p.x += Point.INC
     p.y += Point.INC
     p.z += Point.INC
-    p.print()
+    p.prints()
 }
 
-extern fn printf(fmt: string, ...args: any)
+@builtin fn print(fmt: string, ...args: any)
 
 /***
 x = 30, y = 60, z = 90

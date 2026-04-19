@@ -3,17 +3,17 @@ struct Point {
     y: i32
     z = 30
     
-    fn print(self: Point) {
-        printf("x = %d, y = %d, z = %d\n", self.x, self.y, self.z)
+    fn prints(self: Point) {
+        print("x = {}, y = {}, z = {}\n", self.x, self.y, self.z)
     }
 }
 
 fn main() {
     const p = Point.{10, 20}
-    p.print()
+    p.prints()
 }
 
-extern fn printf(fmt: string, ...args: any)
+@builtin fn print(fmt: string, ...args: any)
 
 /***
 x = 10, y = 20, z = 30

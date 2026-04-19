@@ -2,25 +2,25 @@ fn main() {
     var a = 0
 
     while a < 5 {
-        printf("%d -> ", a)
+        print("{} -> ", a)
         
-        if a % 2 == 0 printf("Even\n")
-        else printf("Odd\n")
+        if a % 2 == 0 print("Even\n")
+        else print("Odd\n")
         
         var c = 0
         
         while c <= a {
-            printf("x")
+            print("x")
             c += 1
         }
         
-        printf("\n")
+        print("\n")
         
         a += 1
     }
 }
 
-extern fn printf(fmt: string, ...values: any)
+@builtin fn print(fmt: string, ...values: any)
 
 /***
 0 -> Even

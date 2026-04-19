@@ -6,10 +6,10 @@ fn main() {
     
     // Print
     for i in size {
-        if arr[i] == 1 printf("*")
-        else printf(" ")
+        if arr[i] == 1 print("*")
+        else print(" ")
     }
-    printf("\n")
+    print("\n")
     
     for size - 1 {
         for i in size {
@@ -29,14 +29,14 @@ fn main() {
         }
         
         for i in size {
-            if arr[i] == 1 printf("*")
-            else printf(" ")
+            if arr[i] == 1 print("*")
+            else print(" ")
         }
-        printf("\n")
+        print("\n")
     }
 }
 
-extern fn printf(fmt: string, ...values: any)
+@builtin fn print(fmt: string, ...values: any)
 
 /***
          *

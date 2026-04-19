@@ -1,0 +1,33 @@
+struct Inner {
+    a: i32
+    b: i32
+}
+
+struct Point {
+    x: i32
+    y: i32
+    i: Inner
+}
+
+fn main() {
+    const x = "SSSS"
+    const c = 'x'
+    const p = Point.{10, 20, .{1, 2}}
+    
+    print("Foo bar {} {} {:c}\n", 10, x, c)
+    print("{:$}\n", p)
+}
+
+@builtin fn print(fmt: string, ...args: any)
+
+/***
+Foo bar 10 SSSS x
+Point {
+    x = 10,
+    y = 20,
+    i = Inner {
+        a = 1,
+        b = 2
+    }
+}
+***/

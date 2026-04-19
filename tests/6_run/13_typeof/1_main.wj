@@ -23,27 +23,27 @@ fn main() {
     const str = "STRING"
     const chr = 'c'
     
-    printf("@typeOf(1) = %s\n", @typeOf(1))
-    printf("@typeOf(2.3) = %s\n", @typeOf(2.3))
-    printf("@typeOf(x) = %s\n", @typeOf(x))
-    printf("@typeOf(y) = %s\n", @typeOf(y))
-    printf("@typeOf(foo) = %s\n", @typeOf(foo))
-    printf("@typeOf(str) = %s\n", @typeOf(str))
-    printf("@typeOf(chr) = %s\n", @typeOf(chr))
-    printf("@typeOf(Foo) = %s\n", @typeOf(Foo))
-    printf("@typeOf(Foo.foo) = %s\n", @typeOf(Foo.foo))
-    printf("@typeOf(Foo.bar) = %s\n", @typeOf(Foo.bar))
-    printf("@typeOf(Foo.baz) = %s\n", @typeOf(Foo.baz))
-    printf("@typeOf(foo.x) = %s\n", @typeOf(foo.x))
-    printf("@typeOf(human) = %s\n", @typeOf(human))
-    printf("@typeOf(Human) = %s\n", @typeOf(Human))
-    printf("@typeOf(Human.foo) = %s\n", @typeOf(Human.foo))
-    printf("@typeOf(Human.bar) = %s\n", @typeOf(Human.bar))
-    printf("@typeOf(Human.baz) = %s\n", @typeOf(Human.baz))
-    printf("@typeOf(printf) = %s\n", @typeOf(printf))
+    print("@typeOf(1) = {}\n", @typeOf(1))
+    print("@typeOf(2.3) = {}\n", @typeOf(2.3))
+    print("@typeOf(x) = {}\n", @typeOf(x))
+    print("@typeOf(y) = {}\n", @typeOf(y))
+    print("@typeOf(foo) = {}\n", @typeOf(foo))
+    print("@typeOf(str) = {}\n", @typeOf(str))
+    print("@typeOf(chr) = {}\n", @typeOf(chr))
+    print("@typeOf(Foo) = {}\n", @typeOf(Foo))
+    print("@typeOf(Foo.foo) = {}\n", @typeOf(Foo.foo))
+    print("@typeOf(Foo.bar) = {}\n", @typeOf(Foo.bar))
+    print("@typeOf(Foo.baz) = {}\n", @typeOf(Foo.baz))
+    print("@typeOf(foo.x) = {}\n", @typeOf(foo.x))
+    print("@typeOf(human) = {}\n", @typeOf(human))
+    print("@typeOf(Human) = {}\n", @typeOf(Human))
+    print("@typeOf(Human.foo) = {}\n", @typeOf(Human.foo))
+    print("@typeOf(Human.bar) = {}\n", @typeOf(Human.bar))
+    print("@typeOf(Human.baz) = {}\n", @typeOf(Human.baz))
+    print("@typeOf(print) = {}\n", @typeOf(print))
 }
 
-extern fn printf(fmt: string, ...args: any)
+@builtin fn print(fmt: string, ...args: any)
 
 /***
 @typeOf(1) = int
@@ -63,5 +63,5 @@ extern fn printf(fmt: string, ...args: any)
 @typeOf(Human.foo) = fn(): void
 @typeOf(Human.bar) = fn(Human): void
 @typeOf(Human.baz) = fn(Human, i32): void
-@typeOf(printf) = fn(string, ...any): void
+@typeOf(print) = fn(string, ...any): void
 ***/

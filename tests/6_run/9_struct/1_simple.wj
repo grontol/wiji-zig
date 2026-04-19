@@ -6,10 +6,10 @@ struct Point {
 fn main() {
     const p = Point.{10, 20}
     
-    printf("x = %d, y = %d\n", p.x, p.y)
+    print("x = {}, y = {}\n", p.x, p.y)
 }
 
-extern fn printf(fmt: string, ...args: any)
+@builtin fn print(fmt: string, ...args: any)
 
 /***
 x = 10, y = 20

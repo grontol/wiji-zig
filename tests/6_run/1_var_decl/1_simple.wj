@@ -13,22 +13,22 @@ fn main() {
     val k = a == 0
     val l = a != 0
     
-    printf("a = %d\n", a)
-    printf("b = %c\n", b)
-    printf("c = %s\n", c)
-    printf("d = %d\n", d)
-    printf("e = %d\n", e)
+    print("a = {}\n", a)
+    print("b = {:c}\n", b)
+    print("c = {}\n", c)
+    print("d = {}\n", d)
+    print("e = {}\n", e)
     
-    printf("f = %d\n", f)
-    printf("g = %d\n", g)
-    printf("h = %d\n", h)
-    printf("i = %d\n", i)
-    printf("j = %d\n", j)
-    printf("k = %d\n", k)
-    printf("l = %d\n", l)
+    print("f = {}\n", f)
+    print("g = {}\n", g)
+    print("h = {}\n", h)
+    print("i = {}\n", i)
+    print("j = {}\n", j)
+    print("k = {}\n", k)
+    print("l = {}\n", l)
 }
 
-extern fn printf(fmt: string, ...values: any)
+@builtin fn print(fmt: string, ...values: any)
 
 /***
 a = 10

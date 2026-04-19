@@ -1,23 +1,16 @@
-import "std"
-
-@builtin fn print(x: string, ...args: any)
-
-struct Inner {
-    a: i32
-    b: i32
-}
-
-struct Point {
+struct Thing {
     x: i32
-    y: i32
-    i: Inner
+    
+    fn foo(self: @Self) {
+        
+    }
 }
 
-fn main() {
-    const x = "SSSS"
-    const c = 'x'
-    const p = Point.{10, 20, .{1, 2}}
+impl string {
+    @builtin @readonly ptr: *u8
+    @builtin @readonly len: usize
     
-    print("Foo bar {} {} {:c}\n", 10, x, c)
-    print("{:$}\n", p)
+    fn split(self: @Self): []@Self {
+        
+    }
 }

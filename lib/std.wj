@@ -1,3 +1,5 @@
+@builtin fn print(x: string, ...args: any)
+
 extern pub fn printf(fmt: cstring, ...args: any): i32
 extern pub fn malloc(size: usize): voidptr
 extern pub fn realloc(ptr: voidptr, size: usize): voidptr
