@@ -1,0 +1,216 @@
+import "std"
+   
+fn main() {
+    print("Result = {}\n", interpret("3 + 2 - 5 * 7"))
+    print("Result = {}\n", interpret("5 * 9 + 12"))
+    print("Result = {}\n", interpret("6 + 4 / 2"))
+    print("Result = {}\n", interpret("(10 + 2) * 4"))
+}
+
+enum TokenKind {
+    invalid,
+    number,
+    op,
+    oparen,
+    cparen,
+}
+
+struct Token {
+    kind: TokenKind
+    value: i32
+}
+
+struct Node {
+    token: Token
+    left: i32 = -1
+    right: i32 = -1
+    
+    fn eval(self: @Self, nodes: &[dyn]Node): i32 {
+        if self.token.kind == .number {
+            return self.token.value
+        }
+        
+        if self.token.kind == .op {
+            if self.left < 0 || self.right < 0 {
+                print("Cannot evaluate node\n")
+                exit(1)
+            }
+            
+            const left = nodes[self.left].eval(nodes)
+            const right = nodes[self.right].eval(nodes)
+            
+            switch self.token.value {
+                '+' => return left + right,
+                '-' => return left - right,
+                '*' => return left * right,
+                '/' => return left / right,
+                else => {}
+            }
+        }
+        
+        return 0
+    }
+}
+
+fn interpret(input: string): i32 {
+    const tokens = tokenize(input)
+    var nodes: [dyn]Node = .[]
+    var opStack: [dyn]i32 = .[]
+    var nodeStack: [dyn]i32 = .[]
+    
+    for token in tokens {
+        switch token.kind {
+            .number => {
+                const node: Node = .{ token = token }
+                nodes.append(node)
+                nodeStack.append(nodes.len - 1)
+            },
+            .oparen => {
+                opStack.append(token.value)
+            },
+            .cparen => {
+                while opStack[opStack.len - 1] != '(' as i32 {
+                    buildNode(&nodes, &nodeStack, &opStack)
+                }
+                
+                dynArrayPop(&opStack)
+            },
+            .op => {
+                while opStack.len > 0 && precedence(opStack[opStack.len - 1]) >= precedence(token.value) {
+                    buildNode(&nodes, &nodeStack, &opStack)
+                }
+                
+                opStack.append(token.value)
+            },
+            else => {},
+        }
+    }
+    
+    while opStack.len > 0 {
+        buildNode(&nodes, &nodeStack, &opStack)
+    }
+    
+    return nodes[nodeStack[nodeStack.len - 1]].eval(&nodes)
+}
+
+fn tokenize(input: string): [dyn]Token {
+    var tokens: [dyn]Token = .[]
+    var i: usize = 0
+    
+    while i < input.len {
+        const c = input[i]
+        i += 1
+        
+        var kind: TokenKind = .invalid
+        var value = -1
+        
+        switch c {
+            ' ' => continue,
+            '+', '-', '*', '/' => {
+                kind = .op
+                value = c
+            },
+            '(' => {
+                kind = .oparen
+                value = c
+            },
+            ')' => {
+                kind = .cparen
+                value = c
+            },
+            '0'...'9' => {
+                var num = c - '0'
+                
+                while i < input.len {
+                    switch input[i] {
+                        '0'...'9' => num = num * 10 + input[i] - '0',
+                        else => break,
+                    }
+                    
+                    i += 1
+                }
+                
+                kind = .number
+                value = num
+            },
+            else => {
+                print("Unknown token {:c}\n", c)
+                exit(1)
+            }
+        }
+        
+        tokens.append(.{
+            kind = kind,
+            value = value,
+        })
+    }
+    
+    return tokens
+}
+
+fn buildNode(nodes: &[dyn]Node, nodeStack: &[dyn]i32, opStack: &[dyn]i32) {
+    if nodeStack.len < 2 {
+        print("nodeStack is not enough\n")
+        exit(1)
+    }
+    
+    if opStack.len < 1 {
+        print("opStack is not enough\n")
+        exit(1)
+    }
+    
+    const right = dynArrayPop(nodeStack)
+    const left = dynArrayPop(nodeStack)
+    const op = dynArrayPop(opStack)
+    
+    nodes.append(.{
+        token = .{ .op, op },
+        left = left,
+        right = right,
+    })
+    nodeStack.append(nodes.len - 1)
+}
+
+fn precedence(op: i32): i32 {
+    switch op {
+        '+', '-' => return 1,
+        '*', '/' => return 2,
+        '(', ')' => return 0,
+        else => return -1,
+    }
+    
+    return -1
+}
+
+fn printArray<T>(arr: [dyn]T) {
+    print("[")
+    
+    for i in arr.len {
+        if i > 0 {
+            print(", ")
+        }
+        
+        print("{}", arr[i])
+    }
+    
+    print("]\n")
+}
+
+fn dynArrayPop<T>(arr: &[dyn]T): T {
+    if arr.len < 1 {
+        print("Cannot pop array. Length is 0\n")
+        exit(1)
+    }
+    
+    const res = arr[arr.len - 1]
+    arr.len -= 1
+    
+    return res
+}
+
+/***
+Result = -30
+Result = 57
+Result = 8
+Result = 48
+***/

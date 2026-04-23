@@ -11,9 +11,10 @@ pub const Module = struct {
     var_decls: []const VarDecl,
     fn_decls: []const FnDecl,
     
+    children: []const *Module,
     public_symbols: std.StringHashMap(TypedSymbol),
     public_child_scopes: std.StringHashMap(*Scope),
-    children: []const *Module,
+    public_impl: std.AutoHashMap(u64, *types.Impl),
 };
 
 pub const Block = struct {
@@ -45,6 +46,7 @@ pub const AssignmentOp = enum {
     mul_eq,
     div_eq,
     mod_eq,
+    xor_eq,
 };
 
 pub const Assignment = struct {
@@ -117,6 +119,7 @@ pub const ForRange = struct {
     start: *Expr,
     end: *Expr,
     body: *Stmt,
+    reversed: bool,
 };
 
 pub const ForEach = struct {
@@ -130,10 +133,15 @@ pub const ForEach = struct {
     is_reference: bool,
     iter: *Expr,
     body: *Stmt,
+    reversed: bool,
 };
 
 pub const Return = struct {
     value: ?*Expr,
+};
+
+pub const Break = struct {
+    index: usize,
 };
 
 pub const Identifier = struct {
@@ -156,6 +164,7 @@ pub const Binop = enum {
     mul,
     div,
     mod,
+    xor,
     gt,
     gte,
     lt,
@@ -216,6 +225,16 @@ pub const EnumMethod = struct {
     enum_typ: *const Type,
 };
 
+pub const ImplField = struct {
+    callee: *Expr,
+    field: *const types.TypeImplField,
+};
+
+pub const ImplMethod = struct {
+    callee: *Expr,
+    method: *const types.TypeMethod,
+};
+
 pub const LiteralKind = enum {
     int,
     float,
@@ -252,6 +271,11 @@ pub const DereferenceOf = struct {
 pub const StringConcat = struct {
     lhs: *Expr,
     rhs: *Expr,
+};
+
+pub const NewString = struct {
+    ptr: *const Expr,
+    len: *const Expr,
 };
 
 pub const BuiltinKind = enum {
@@ -329,28 +353,33 @@ pub const StmtKind = enum {
     whil,
     returns,
     breaq,
+    continues,
     expr,
     noop,
 };
 
-pub const Stmt = union(StmtKind) {
-    module: Module,
-    block: Block,
-    var_decl: VarDecl,
-    assignment: Assignment,
-    fn_call: FnCall,
-    iff: If,
-    switc: Switch,
-    for_range: ForRange,
-    for_each: ForEach,
-    whil: While,
-    returns: Return,
-    breaq,
-    expr: Expr,
-    noop,
+pub const Stmt = struct {
+    value: union(StmtKind) {
+        module: Module,
+        block: Block,
+        var_decl: VarDecl,
+        assignment: Assignment,
+        fn_call: FnCall,
+        iff: If,
+        switc: Switch,
+        for_range: ForRange,
+        for_each: ForEach,
+        whil: While,
+        returns: Return,
+        breaq: Break,
+        continues,
+        expr: Expr,
+        noop,
+    },
+    break_id: ?usize = null,
     
     pub fn canBeUsedAsExpr(self: *const Stmt) bool {
-        switch (self.*) {
+        switch (self.value) {
             .fn_call,
             .expr => { return true; },
             .iff => |iff| {
@@ -362,12 +391,12 @@ pub const Stmt = union(StmtKind) {
     }
     
     pub fn transformToExpr(self: *const Stmt) Expr {
-        switch (self.*) {
+        switch (self.value) {
             .expr => |expr| { return expr; },
             .iff  => |iff|  { return iff.as_expr.?.*; },
             
             else => {
-                std.debug.panic("Cannot transform stmt {s} to expr", .{@tagName(self.*)});
+                std.debug.panic("Cannot transform stmt {s} to expr", .{@tagName(self.value)});
             }
         }
     }
@@ -387,6 +416,8 @@ pub const ExprKind = enum {
     struct_method,
     enum_value,
     enum_method,
+    impl_field,
+    impl_method,
     iff,
     cast,
     referenc_of,
@@ -394,6 +425,7 @@ pub const ExprKind = enum {
     block,
     string_concat,
     builtin,
+    new_string,
     invalid,
     typ,
 };
@@ -413,6 +445,8 @@ pub const Expr = struct {
         struct_method: StructMethod,
         enum_value: EnumValue,
         enum_method: EnumMethod,
+        impl_field: ImplField,
+        impl_method: ImplMethod,
         iff: IfExpr,
         cast: Cast,
         referenc_of: ReferenceOf,
@@ -420,6 +454,7 @@ pub const Expr = struct {
         block: BlockExpr,
         string_concat: StringConcat,
         builtin: Builtin,
+        new_string: NewString,
         invalid,
         typ: *const Type,
     },
@@ -649,17 +684,17 @@ pub const Printer = struct {
     }
     
     fn printStmt(self: *Printer, stmt: *const Stmt) void {
-        switch (stmt.*) {
-            StmtKind.var_decl   => { self.printVarDecl(&stmt.var_decl); },
-            StmtKind.assignment => { self.printAssignment(&stmt.assignment); },
-            StmtKind.fn_call    => { self.printFnCall(&stmt.fn_call); },
-            StmtKind.returns    => { self.printReturn(&stmt.returns); },
-            StmtKind.iff        => { self.printIf(&stmt.iff); },
-            StmtKind.block      => { self.printBlock(&stmt.block); },
-            StmtKind.expr       => { self.printExpr(&stmt.expr); },
+        switch (stmt.value) {
+            StmtKind.var_decl   => { self.printVarDecl(&stmt.value.var_decl); },
+            StmtKind.assignment => { self.printAssignment(&stmt.value.assignment); },
+            StmtKind.fn_call    => { self.printFnCall(&stmt.value.fn_call); },
+            StmtKind.returns    => { self.printReturn(&stmt.value.returns); },
+            StmtKind.iff        => { self.printIf(&stmt.value.iff); },
+            StmtKind.block      => { self.printBlock(&stmt.value.block); },
+            StmtKind.expr       => { self.printExpr(&stmt.value.expr); },
             
             else => {
-                std.debug.panic("TODO: printStmt {s}", .{@tagName(stmt.*)});
+                std.debug.panic("TODO: printStmt {s}", .{@tagName(stmt.value)});
             }
         }
     }

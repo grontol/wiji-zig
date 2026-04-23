@@ -2,7 +2,8 @@ const std = @import("std");
 const Symbol = @import("symbol.zig").Symbol;
 const TypedSymbol = @import("symbol.zig").TypedSymbol;
 const Mutability = @import("symbol.zig").Mutability;
-const Type = @import("type.zig").Type;
+const types = @import("type.zig");
+const Type = types.Type;
 
 pub const ScopeMode = enum {
     module,
@@ -14,6 +15,7 @@ pub const Scope = struct {
     parent: ?*Scope,
     syms: std.StringHashMap(TypedSymbol),
     child_scopes: std.StringHashMap(*Scope),
+    impls: std.AutoHashMap(u64, *types.Impl),
     allocator: std.mem.Allocator,
     mode: ScopeMode,
     
@@ -22,6 +24,7 @@ pub const Scope = struct {
             .parent = null,
             .syms = std.StringHashMap(TypedSymbol).init(allocator),
             .child_scopes = std.StringHashMap(*Scope).init(allocator),
+            .impls = std.AutoHashMap(u64, *types.Impl).init(allocator),
             .allocator = allocator,
             .mode = mode,
         };
@@ -37,6 +40,7 @@ pub const Scope = struct {
             .parent = self,
             .syms = std.StringHashMap(TypedSymbol).init(self.allocator),
             .child_scopes = std.StringHashMap(*Scope).init(self.allocator),
+            .impls = std.AutoHashMap(u64, *types.Impl).init(self.allocator),
             .allocator = self.allocator,
             .mode = self.mode,
         };
@@ -50,6 +54,7 @@ pub const Scope = struct {
             .parent = self,
             .syms = std.StringHashMap(TypedSymbol).init(allocator),
             .child_scopes = std.StringHashMap(*Scope).init(allocator),
+            .impls = std.AutoHashMap(u64, *types.Impl).init(allocator),
             .allocator = allocator,
             .mode = mode,
         };
@@ -127,5 +132,37 @@ pub const Scope = struct {
     
     pub fn setTypedSymbol(self: *Scope, key: []const u8, typed_symbol: TypedSymbol) void {
         self.syms.put(key, typed_symbol) catch unreachable;
+    }
+    
+    pub fn setImpl(self: *Scope, type_id: u64, impl: *types.Impl) void {
+        self.impls.put(type_id, impl) catch unreachable;
+    }
+    
+    pub fn getImplField(self: *Scope, type_id: u64, key: []const u8) ?*const types.TypeImplField {
+        if (self.impls.get(type_id)) |impl| {
+            if (impl.field_map.get(key)) |index| {
+                return &impl.fields[index];
+            }
+        }
+        
+        if (self.parent) |parent| {
+            return parent.getImplField(type_id, key);
+        }
+        
+        return null;
+    }
+    
+    pub fn getImplMethod(self: *Scope, type_id: u64, key: []const u8) ?*const types.TypeMethod {
+        if (self.impls.get(type_id)) |impl| {
+            if (impl.method_map.get(key)) |index| {
+                return &impl.methods[index];
+            }
+        }
+        
+        if (self.parent) |parent| {
+            return parent.getImplMethod(type_id, key);
+        }
+        
+        return null;
     }
 };

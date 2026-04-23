@@ -278,7 +278,7 @@ const Cgen = struct {
         var has_semicolon = true;
         var has_newline = true;
         
-        switch (stmt.*) {
+        switch (stmt.value) {
             .var_decl   => |var_decl|  { self.genVarDecl(&var_decl, false); },
             .assignment => |ass|       { self.genAssignment(&ass); },
             .fn_call    => |fn_call|   { self.genFnCall(&fn_call); },
@@ -289,16 +289,21 @@ const Cgen = struct {
             .for_range  => |for_range| { self.genForRange(&for_range); has_semicolon = false; },
             .for_each   => |for_each|  { self.genForEach(&for_each); has_semicolon = false; },
             .block      => |block|     { self.genBlock(&block, dont_create_block); has_semicolon = false; has_newline = false; },
-            .breaq      => |_|         { self.genBreak(); },
+            .breaq      => |breaq|     { self.genBreak(&breaq); },
+            .continues  => |_|         { self.genContinue(); },
             .expr       => |expr|      { self.genExpr(&expr); },
             
             else => {
-                std.debug.panic("TODO: genStmt {s}", .{@tagName(stmt.*)});
+                std.debug.panic("TODO: genStmt {s}", .{@tagName(stmt.value)});
             }
         }
         
         if (has_semicolon) {
             self.write(";");
+        }
+        
+        if (stmt.break_id) |index| {
+            self.writeArgs("__goto__{}:", .{index});
         }
         
         if (has_newline) {
@@ -327,8 +332,12 @@ const Cgen = struct {
         }
     }
     
-    fn genBreak(self: *Cgen) void {
-        self.write("break");
+    fn genBreak(self: *Cgen, breaq: *const tast.Break) void {
+        self.writeArgs("goto __goto__{}", .{breaq.index});
+    }
+    
+    fn genContinue(self: *Cgen) void {
+        self.write("continue");
     }
     
     fn genVarDecl(self: *Cgen, decl: *const tast.VarDecl, is_top_level: bool) void {
@@ -362,6 +371,7 @@ const Cgen = struct {
             .mul_eq   => "*=",
             .div_eq   => "/=",
             .mod_eq   => "%=",
+            .xor_eq   => "^=",
         };
         
         self.writeArgs(" {s} ", .{op});
@@ -396,6 +406,21 @@ const Cgen = struct {
             self.write("(");
             
             self.genExpr(fn_call.callee.value.enum_method.callee);
+            
+            for (fn_call.args) |arg| {
+                self.write(", ");                
+                self.genExpr(&arg);
+            }
+            
+            self.write(")");
+        }
+        else if (fn_call.callee.value == .impl_method) {
+            const method = fn_call.callee.value.impl_method.method;
+            
+            self.writeSymbol(method.name);
+            self.write("(");
+            
+            self.genExpr(fn_call.callee.value.impl_method.callee);
             
             for (fn_call.args) |arg| {
                 self.write(", ");                
@@ -537,11 +562,20 @@ const Cgen = struct {
             }
         };
         
-        self.writeArgs("for (int {s} = ", .{var_name});
-        self.genExpr(for_range.start);
-        self.writeArgs("; {s} < ", .{var_name});
-        self.genExpr(for_range.end);
-        self.writeArgs("; {s}++) ", .{var_name});
+        if (for_range.reversed) {
+            self.writeArgs("for (int {s} = ", .{var_name});
+            self.genExpr(for_range.end);
+            self.writeArgs(" - 1; {s} >= ", .{var_name});
+            self.genExpr(for_range.start);
+            self.writeArgs("; {s}--) ", .{var_name});
+        }
+        else {
+            self.writeArgs("for (int {s} = ", .{var_name});
+            self.genExpr(for_range.start);
+            self.writeArgs("; {s} < ", .{var_name});
+            self.genExpr(for_range.end);
+            self.writeArgs("; {s}++) ", .{var_name});
+        }
         
         self.write("{{\n");
         self.indent += 1;
@@ -574,13 +608,15 @@ const Cgen = struct {
         
         self.writeIndent();
         
-        switch (for_each.kind) {
-            .array => self.writeArgs("for (int {[index_var]s} = 0; {[index_var]s} < {[iter_var]s}.len; {[index_var]s}++) ", .{
+        if (for_each.reversed) {
+            self.writeArgs("for (int {[index_var]s} = {[iter_var]s}.len - 1; {[index_var]s} >= 0; {[index_var]s}--) ", .{
                 .index_var = index_var_name, .iter_var = iter_name
-            }),
-            .string => self.writeArgs("for (int {[index_var]s} = 0; {[index_var]s} < {[iter_var]s}.len; {[index_var]s}++) ", .{
+            });
+        }
+        else {
+            self.writeArgs("for (int {[index_var]s} = 0; {[index_var]s} < {[iter_var]s}.len; {[index_var]s}++) ", .{
                 .index_var = index_var_name, .iter_var = iter_name
-            }),
+            });
         }
         
         self.write("{{\n");
@@ -622,10 +658,12 @@ const Cgen = struct {
             .struct_value  => |val|     { self.genStructValue(&val, expr.typ); },
             .struct_member => |mem|     { self.genStructMember(&mem); },
             .enum_value    => |val|     { self.genEnumValue(&val, expr.typ); },
+            .impl_field    => |field|   { self.genImplField(&field); },
             .cast          => |cast|    { self.genCast(&cast); },
             .referenc_of   => |refof|   { self.genReferenceOf(&refof); },
             .dereferenc_of => |derefof| { self.genDereferenceOf(&derefof); },
             .string_concat => |str_cat| { self.genStringConcat(&str_cat); },
+            .new_string    => |str|     { self.genNewString(&str); },
             .builtin       => |builtin| { self.genBuiltin(&builtin, &.{}); },
             
             else => {
@@ -675,6 +713,7 @@ const Cgen = struct {
             tast.Binop.mul     => "*",
             tast.Binop.div     => "/",
             tast.Binop.mod     => "%",
+            tast.Binop.xor     => "^",
             tast.Binop.gt      => ">",
             tast.Binop.gte     => ">=",
             tast.Binop.lt      => "<",
@@ -781,7 +820,11 @@ const Cgen = struct {
                 self.genDynArrayAppendMacro();
                 
                 self.write("DYN_ARRAY_APPEND(");
-                self.genType(builtin.dynarray_append.arr.typ.value.array.child);
+                
+                const typ = if (builtin.dynarray_append.arr.typ.value == .array) builtin.dynarray_append.arr.typ.value.array.child
+                else builtin.dynarray_append.arr.typ.value.reference.child.value.array.child;
+                
+                self.genType(typ);
                 self.write(", ");
                 
                 if (!builtin.dynarray_append.is_reference) {
@@ -914,6 +957,17 @@ const Cgen = struct {
         self.writeArgs("{s}_{s}", .{typ.value.@"enum".name.text, typ.value.@"enum".items[val.item_index].text});        
     }
     
+    fn genImplField(self: *Cgen, field: *const tast.ImplField) void {
+        self.genExpr(field.callee);
+        
+        if (field.callee.typ.value == .reference) {
+            self.writeArgs("->{s}", .{field.field.name.text});
+        }
+        else {
+            self.writeArgs(".{s}", .{field.field.name.text});
+        }
+    }
+    
     fn genCast(self: *Cgen, cast: *const tast.Cast) void {
         self.write("((");
         self.genType(cast.typ);
@@ -937,6 +991,15 @@ const Cgen = struct {
         self.genExpr(str_cat.lhs);
         self.write(" ");
         self.genExpr(str_cat.rhs);
+    }
+    
+    fn genNewString(self: *Cgen, str: *const tast.NewString) void {
+        self.write("((string){{ .ptr = ");
+        self.genExpr(str.ptr);
+        self.write(", .len = ");
+        self.write(" ");
+        self.genExpr(str.len);
+        self.write(" }})");
     }
     
     fn genRepeat(self: *Cgen, repeat: *const tast.Repeat) void {

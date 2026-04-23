@@ -219,6 +219,46 @@ const Parser = struct {
         return res;
     }
     
+    fn hasEnumNext(self: *Parser) bool {
+        var res = false;
+        self.ts.mark();
+        
+        while (self.ts.hasNext()) {
+            switch (self.ts.peek().kind) {
+                TokenKind.KeywordPub => _ = self.ts.next(),
+                TokenKind.KeywordEnum => {
+                    res = true;
+                    break;
+                },
+                else => break,
+            }
+        }
+        
+        self.ts.restore();
+        
+        return res;
+    }
+    
+    fn hasImplNext(self: *Parser) bool {
+        var res = false;
+        self.ts.mark();
+        
+        while (self.ts.hasNext()) {
+            switch (self.ts.peek().kind) {
+                TokenKind.KeywordPub => _ = self.ts.next(),
+                TokenKind.KeywordImpl => {
+                    res = true;
+                    break;
+                },
+                else => break,
+            }
+        }
+        
+        self.ts.restore();
+        
+        return res;
+    }
+    
     fn parseModule(self: *Parser) ast.Module {
         var exprs: std.ArrayList(ast.Expr) = .empty;
         
@@ -388,6 +428,7 @@ const Parser = struct {
             TokenKind.KeywordFn => expr = self.parseFnDecl(null, false),
             TokenKind.KeywordStruct => expr = self.parseStructDecl(),
             TokenKind.KeywordEnum => expr = self.parseEnumDecl(),
+            TokenKind.KeywordImpl => expr = self.parseImplDecl(),
             TokenKind.KeywordPub => {
                 if (self.hasFnNext()) {
                     expr = self.parseFnDecl(null, false);
@@ -397,6 +438,12 @@ const Parser = struct {
                 }
                 else if (self.hasStructNext()) {
                     expr = self.parseStructDecl();
+                }
+                else if (self.hasEnumNext()) {
+                    expr = self.parseEnumDecl();
+                }
+                else if (self.hasImplNext()) {
+                    expr = self.parseImplDecl();
                 }
                 else {
                     self.reporter.reportErrorAtToken(self.ts.peekN(2), "Invalid pub modifier", .{});
@@ -463,6 +510,7 @@ const Parser = struct {
                 }
             },
             TokenKind.KeywordReturn => { expr = self.parseReturn(); },
+            TokenKind.KeywordContinue => { expr = self.parseContinue(); },
             TokenKind.Not,
             TokenKind.Minus => { expr = self.parseUnary(); },
             TokenKind.And => { expr = self.parseAddressOf(); },
@@ -668,6 +716,15 @@ const Parser = struct {
         };
     }
     
+    fn parseContinue(self: *Parser) ast.Expr {
+        const continue_token = self.ts.nextExpect(.KeywordContinue);
+        
+        return .{
+            .span = TokenSpan.from_token(continue_token),
+            .value = .continues,
+        };
+    }
+    
     fn parseStructDecl(self: *Parser) ast.Expr {
         var pub_token: ?Token = null;
         
@@ -725,41 +782,14 @@ const Parser = struct {
         var fields = std.ArrayList(ast.StructField).empty;
         var members = std.ArrayList(ast.Expr).empty;
         
-        const Mode = enum {
-            unknown,
-            field,
-            var_decl,
-            fn_decl,
-            struct_decl,
-        };
-        
-        var mode: Mode = .unknown;
-        
         while (self.ts.hasNext()) {
+            var is_field = false;
+            
             switch (self.ts.peek().kind) {
                 TokenKind.CloseCurlyBracket => break,
-                TokenKind.KeywordVar,
-                TokenKind.KeywordVal,
-                TokenKind.KeywordConst => mode = .var_decl,
-                TokenKind.KeywordFn => mode = .fn_decl,
-                TokenKind.KeywordStruct => mode = .struct_decl,
-                TokenKind.KeywordPub => {
-                    if (self.hasVarDeclNext()) {
-                        mode = .var_decl;
-                    }
-                    else if (self.hasFnNext()) {
-                        mode = .fn_decl;
-                    }
-                    else if (self.hasStructNext()) {
-                        mode = .struct_decl;
-                    }
-                    else {
-                        self.reporter.reportErrorAtToken(self.ts.peekN(2), "Invalid pub modifier", .{});
-                    }
-                },
                 TokenKind.KeywordUsing => {
                     if (self.ts.peekN(2).kind == .Identifier and (self.ts.peekN(3).kind == .Colon or self.ts.peekN(3).kind == .Eq)) {
-                        mode = .field;
+                        is_field = true;
                     }
                     else {
                         self.reporter.reportErrorAtToken(self.ts.peek(), "`using` must be followed by field declaration", .{});
@@ -767,73 +797,50 @@ const Parser = struct {
                 },
                 TokenKind.Identifier => {
                     if (self.ts.peekN(2).kind == .Colon or self.ts.peekN(2).kind == .Eq) {
-                        mode = .field;
-                    }
-                    else {
-                        mode = .unknown;
+                        is_field = true;                        
                     }
                 },
-                
-                else => {
-                    mode = .unknown;                    
-                }
+                else => {}
             }
             
-            switch (mode) {
-                .unknown => {
-                    self.reporter.reportErrorAtToken(self.ts.peek(), "Only fields, variable, function & struct declaration are allowed inside struct", .{});
-                },
-                .field => {
-                    var using_token: ?Token = null;
+            if (is_field) {
+                var using_token: ?Token = null;
                     
-                    if (self.ts.peek().kind == .KeywordUsing) {
-                        using_token = self.ts.next();
-                    }
-                    
-                    const field_name_token = self.ts.nextExpect(.Identifier);
-                    var field_typ: ?ast.Type = null;
-                    var field_default_value: ?*ast.Expr = null;
-                    
-                    if (self.ts.peek().kind == .Colon) {
-                        _ = self.ts.next();
-                        field_typ = self.parseType();
-                    }
-                    
-                    if (self.ts.peek().kind == .Eq) {
-                        _ = self.ts.next();
-                        field_default_value = self.makeExprPointer(self.parseExpr());
-                    }
-                    
-                    if (field_typ == null and field_default_value == null) {
-                        self.reporter.reportErrorAtToken(field_name_token, "Expected type or default value", .{});
-                    }
-                    
-                    fields.append(self.temp_allocator, ast.StructField{
-                        .name = field_name_token,
-                        .typ = field_typ,
-                        .default_value = field_default_value,
-                        .using = using_token,
-                    }) catch unreachable;
-                    
-                    if (self.ts.peek().kind == .Comma) {
-                        _ = self.ts.next();
-                    }
-                },
-                else => {
-                    const expr = self.parseExpr();
+                if (self.ts.peek().kind == .KeywordUsing) {
+                    using_token = self.ts.next();
+                }
                 
-                    // Only var_decl, function & struct declaration allowed inside struct
-                    switch (expr.value) {
-                        ast.Kind.var_decl,
-                        ast.Kind.fn_decl,
-                        ast.Kind.struct_decl => {},
-                        else => {
-                            self.reporter.reportErrorAtSpan(expr.span, "Only fields, variable, function & struct declaration are allowed inside struct", .{});
-                        }
-                    }
-                    
-                    members.append(self.temp_allocator, expr) catch unreachable;
-                },
+                const field_name_token = self.ts.nextExpect(.Identifier);
+                var field_typ: ?ast.Type = null;
+                var field_default_value: ?*ast.Expr = null;
+                
+                if (self.ts.peek().kind == .Colon) {
+                    _ = self.ts.next();
+                    field_typ = self.parseType();
+                }
+                
+                if (self.ts.peek().kind == .Eq) {
+                    _ = self.ts.next();
+                    field_default_value = self.makeExprPointer(self.parseExpr());
+                }
+                
+                if (field_typ == null and field_default_value == null) {
+                    self.reporter.reportErrorAtToken(field_name_token, "Expected type or default value", .{});
+                }
+                
+                fields.append(self.temp_allocator, ast.StructField{
+                    .name = field_name_token,
+                    .typ = field_typ,
+                    .default_value = field_default_value,
+                    .using = using_token,
+                }) catch unreachable;
+                
+                if (self.ts.peek().kind == .Comma) {
+                    _ = self.ts.next();
+                }
+            }
+            else {
+                members.append(self.temp_allocator, self.parseContainerMember()) catch unreachable;
             }
         }
         
@@ -872,51 +879,10 @@ const Parser = struct {
         var items = std.ArrayList(Token).empty;
         var members = std.ArrayList(ast.Expr).empty;
         
-        const Mode = enum {
-            unknown,
-            item,
-            var_decl,
-            fn_decl,
-            struct_decl,
-        };
-        
-        var mode: Mode = .unknown;
-        
         while (self.ts.hasNext()) {
             switch (self.ts.peek().kind) {
                 TokenKind.CloseCurlyBracket => break,
-                TokenKind.KeywordVar,
-                TokenKind.KeywordVal,
-                TokenKind.KeywordConst => mode = .var_decl,
-                TokenKind.KeywordFn => mode = .fn_decl,
-                TokenKind.KeywordPub => {
-                    if (self.hasVarDeclNext()) {
-                        mode = .var_decl;
-                    }
-                    else if (self.hasFnNext()) {
-                        mode = .fn_decl;
-                    }
-                    else if (self.hasStructNext()) {
-                        mode = .struct_decl;
-                    }
-                    else {
-                        self.reporter.reportErrorAtToken(self.ts.peekN(2), "Invalid pub modifier", .{});
-                    }
-                },
                 TokenKind.Identifier => {
-                    mode = .item;
-                },
-                
-                else => {
-                    mode = .unknown;
-                }
-            }
-            
-            switch (mode) {
-                .unknown => {
-                    self.reporter.reportErrorAtToken(self.ts.peek(), "Only items, variable, function & struct declaration are allowed inside enum", .{});
-                },
-                .item => {
                     items.append(self.temp_allocator, self.ts.nextExpect(.Identifier)) catch unreachable;
                 
                     if (self.ts.peek().kind == .Comma) {
@@ -927,20 +893,8 @@ const Parser = struct {
                     }
                 },
                 else => {
-                    const expr = self.parseExpr();
-                
-                    // Only var_decl, function & struct declaration allowed inside struct
-                    switch (expr.value) {
-                        ast.Kind.var_decl,
-                        ast.Kind.fn_decl,
-                        ast.Kind.struct_decl => {},
-                        else => {
-                            self.reporter.reportErrorAtSpan(expr.span, "Only items, variable, function & struct declaration are allowed inside enum", .{});
-                        }
-                    }
-                    
-                    members.append(self.temp_allocator, expr) catch unreachable;
-                },
+                    members.append(self.temp_allocator, self.parseContainerMember()) catch unreachable;
+                }
             }
         }
         
@@ -956,6 +910,125 @@ const Parser = struct {
                 .members = self.collectAndFreeTempList(ast.Expr, &members),
             }},
         };
+    }
+    
+    fn parseImplDecl(self: *Parser) ast.Expr {
+        var pub_token: ?Token = null;
+        
+        if (self.ts.peek().kind == .KeywordPub) {
+            pub_token = self.ts.next();
+        }
+        
+        const impl_token = self.ts.nextExpect(.KeywordImpl);
+        const typ = self.parseType();
+        
+        _ = self.ts.nextExpect(.OpenCurlyBracket);
+        
+        var fields = std.ArrayList(ast.ImplField).empty;
+        var members = std.ArrayList(ast.Expr).empty;
+        
+        while (self.ts.hasNext()) {
+            switch (self.ts.peek().kind) {
+                TokenKind.CloseCurlyBracket => break,
+                TokenKind.Identifier => {
+                    if (self.ts.peekN(2).kind == .Colon) {
+                        const field_name_token = self.ts.nextExpect(.Identifier);
+                        _ = self.ts.nextExpect(.Colon);
+                        const field_typ = self.parseType();
+                        
+                        fields.append(self.temp_allocator, ast.ImplField{
+                            .name = field_name_token,
+                            .typ = field_typ,
+                        }) catch unreachable;
+                        
+                        if (self.ts.peek().kind == .Comma) {
+                            _ = self.ts.next();
+                        }
+                    }
+                },
+                else => {
+                    members.append(self.temp_allocator, self.parseContainerMember()) catch unreachable;
+                }
+            }
+        }
+        
+        const close_curly_token = self.ts.nextExpect(.CloseCurlyBracket);
+        
+        return .{
+            .span = TokenSpan.from_tokens(pub_token orelse impl_token, close_curly_token),
+            .value = .{.impl_decl = .{
+                .is_public = pub_token != null,
+                .fields = self.collectAndFreeTempList(ast.ImplField, &fields),
+                .members = self.collectAndFreeTempList(ast.Expr, &members),
+                .typ = typ,
+            }},
+        };
+    }
+    
+    fn parseContainerMember(self: *Parser) ast.Expr {
+        const Mode = enum {
+            unknown,
+            field,
+            var_decl,
+            fn_decl,
+            struct_decl,
+        };
+        
+        var mode = Mode.unknown;
+        
+        switch (self.ts.peek().kind) {
+            TokenKind.KeywordVar,
+            TokenKind.KeywordVal,
+            TokenKind.KeywordConst => mode = .var_decl,
+            TokenKind.KeywordFn => mode = .fn_decl,
+            TokenKind.KeywordStruct => mode = .struct_decl,
+            TokenKind.KeywordPub => {
+                if (self.hasVarDeclNext()) {
+                    mode = .var_decl;
+                }
+                else if (self.hasFnNext()) {
+                    mode = .fn_decl;
+                }
+                else if (self.hasStructNext()) {
+                    mode = .struct_decl;
+                }
+                else {
+                    self.reporter.reportErrorAtToken(self.ts.peekN(2), "Invalid pub modifier", .{});
+                }
+            },
+            TokenKind.KeywordUsing => {
+                if (self.ts.peekN(2).kind == .Identifier and (self.ts.peekN(3).kind == .Colon or self.ts.peekN(3).kind == .Eq)) {
+                    mode = .field;
+                }
+                else {
+                    self.reporter.reportErrorAtToken(self.ts.peek(), "`using` must be followed by field declaration", .{});
+                }
+            },            
+            else => {
+                mode = .unknown;                    
+            }
+        }
+        
+        switch (mode) {
+            .unknown => {
+                self.reporter.reportErrorAtToken(self.ts.peek(), "Only fields, variable, function & struct declaration are allowed inside struct", .{});
+            },
+            else => {
+                const expr = self.parseExpr();
+            
+                // Only var_decl, function & struct declaration allowed inside struct
+                switch (expr.value) {
+                    ast.Kind.var_decl,
+                    ast.Kind.fn_decl,
+                    ast.Kind.struct_decl => {},
+                    else => {
+                        self.reporter.reportErrorAtSpan(expr.span, "Only fields, variable, function & struct declaration are allowed inside struct", .{});
+                    }
+                }
+                
+                return expr;
+            },
+        }
     }
     
     fn parseVarDecl(self: *Parser) ast.Expr {
@@ -1062,6 +1135,21 @@ const Parser = struct {
         //
         
         const iter = self.makeExprPointer(self.parseExpr());
+        var reversed = false;
+        
+        if (self.ts.peek().kind == .At) {
+            const token = self.ts.peekN(2);
+            
+            if (std.mem.eql(u8, self.getTokenText(token), "reversed")) {
+                reversed = true;
+                _ = self.ts.next();
+                _ = self.ts.next();
+            }
+            else {
+                self.reporter.reportErrorAtToken(token, "Invalid modifier {s}", .{self.getTokenText(token)});
+            }
+        }
+        
         const body = self.makeExprPointer(self.parseExpr());
         
         return .{
@@ -1071,6 +1159,7 @@ const Parser = struct {
                 .is_reference = is_reference,
                 .iter = iter,
                 .body = body,
+                .reversed = reversed,
             }},
             .span = TokenSpan.from_token_and_span(for_token, body.span),
         };

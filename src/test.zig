@@ -104,8 +104,6 @@ pub fn main() !void {
             .failed => {
                 std.debug.print(ANSI_RED ++ "\nat:\n{s}:0\n" ++ ANSI_RESET, .{entry.path});
                 failed_count += 1;
-                
-                std.process.exit(0);
             },
             .skipped => {
                 std.debug.print(ANSI_YELLOW ++ " [SKIPPED]\n" ++ ANSI_RESET, .{});

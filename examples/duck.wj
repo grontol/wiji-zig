@@ -12,19 +12,20 @@ fn main() {
     
     initAudioDevice()
     
-    const duck = loadTexture("examples/bebek.jpg")
+    const duck = loadTexture("examples/cat.jpg")
     const sound = loadSound("examples/bebek.mp3")
     setSoundPitch(sound, 2)
     
     val ducks: []Duck = .[
         .{ key = KEY_A, pitch = 1.0, x = 20 },
-        .{ key = KEY_S, pitch = powf(2, 2.0 / 12), x = 120 },
-        .{ key = KEY_D, pitch = powf(2, 4.0 / 12), x = 220 },
-        .{ key = KEY_F, pitch = powf(2, 5.0 / 12), x = 320 },
-        .{ key = KEY_G, pitch = powf(2, 7.0 / 12), x = 420 },
-        .{ key = KEY_H, pitch = powf(2, 9.0 / 12), x = 520 },
-        .{ key = KEY_J, pitch = powf(2, 11.0 / 12), x = 620 },
-        .{ key = KEY_K, pitch = 2.0, x = 720 },
+        .{ key = KEY_S, pitch = powf(2, 2.0 / 12), x = 80 },
+        .{ key = KEY_D, pitch = powf(2, 4.0 / 12), x = 140 },
+        .{ key = KEY_F, pitch = powf(2, 5.0 / 12), x = 200 },
+        .{ key = KEY_G, pitch = powf(2, 7.0 / 12), x = 260 },
+        .{ key = KEY_H, pitch = powf(2, 9.0 / 12), x = 320 },
+        .{ key = KEY_J, pitch = powf(2, 11.0 / 12), x = 380 },
+        .{ key = KEY_K, pitch = 2.0, x = 440 },
+        .{ key = KEY_L, pitch = 2.0 * powf(2, 2.0 / 12), x = 500 },
     ]
     
     while !windowShouldClose() {

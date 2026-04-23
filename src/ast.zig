@@ -106,6 +106,18 @@ pub const EnumDecl = struct {
     members: []const Expr,
 };
 
+pub const ImplField = struct {
+    name: Token,
+    typ: Type,
+};
+
+pub const ImplDecl = struct {
+    is_public: bool,
+    typ: Type,
+    fields: []const ImplField,
+    members: []const Expr,
+};
+
 pub const Unary = struct {
     expr: *Expr,
     op: Token,
@@ -157,6 +169,7 @@ pub const For = struct {
     is_reference: bool,
     iter: *Expr,
     body: *Expr,
+    reversed: bool,
 };
 
 pub const While = struct {
@@ -243,6 +256,7 @@ pub const Kind = enum {
     fn_decl,
     struct_decl,
     enum_decl,
+    impl_decl,
     
     unary,
     binary,
@@ -260,6 +274,7 @@ pub const Kind = enum {
     assignment,
     breaq,
     returns,
+    continues,
     address_of,
     cast,
     intrinsic,
@@ -280,6 +295,7 @@ pub const Expr = struct {
         fn_decl: FnDecl,
         struct_decl: StructDecl,
         enum_decl: EnumDecl,
+        impl_decl: ImplDecl,
         
         unary: Unary,
         binary: Binary,
@@ -297,6 +313,7 @@ pub const Expr = struct {
         assignment: Assignment,
         breaq,
         returns: Return,
+        continues,
         address_of: AddressOf,
         cast: Cast,
         intrinsic: Intrinsic,

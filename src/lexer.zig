@@ -154,10 +154,12 @@ const Lexer = struct {
         else if (std.mem.eql(u8, text, "const"))     { self.pushToken(TokenKind.KeywordConst, start, end); }
         else if (std.mem.eql(u8, text, "extern"))    { self.pushToken(TokenKind.KeywordExtern, start, end); }
         else if (std.mem.eql(u8, text, "return"))    { self.pushToken(TokenKind.KeywordReturn, start, end); }
+        else if (std.mem.eql(u8, text, "continue"))  { self.pushToken(TokenKind.KeywordContinue, start, end); }
         else if (std.mem.eql(u8, text, "true"))      { self.pushToken(TokenKind.TrueLit, start, end); }
         else if (std.mem.eql(u8, text, "false"))     { self.pushToken(TokenKind.FalseLit, start, end); }
         else if (std.mem.eql(u8, text, "dyn"))       { self.pushToken(TokenKind.KeywordDyn, start, end); }
         else if (std.mem.eql(u8, text, "using"))     { self.pushToken(TokenKind.KeywordUsing, start, end); }
+        else if (std.mem.eql(u8, text, "impl"))      { self.pushToken(TokenKind.KeywordImpl, start, end); }
         else                                         { self.pushToken(TokenKind.Identifier, start, end); }
     }
     
@@ -458,6 +460,7 @@ pub fn tokenize(allocator: std.mem.Allocator, reporter: *const Reporter, file_id
             ':'         => lexer.pushTokenMaybeTwo(':', .Colon, .ColonColon, i),
             '-'         => lexer.pushTokenMaybeTwo('=', .Minus, .MinusEq, i),
             '%'         => lexer.pushTokenMaybeTwo('=', .Mod, .ModEq, i),
+            '^'         => lexer.pushTokenMaybeTwo('=', .Xor, .XorEq, i),
             '<'         => lexer.pushTokenMaybeTwo('=', .Lt, .Lte, i),
             '>'         => lexer.pushTokenMaybeTwo('=', .Gt, .Gte, i),
             '!'         => lexer.pushTokenMaybeTwo('=', .Not, .NotEq, i),

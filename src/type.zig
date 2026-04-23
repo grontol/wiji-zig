@@ -187,6 +187,39 @@ pub const TypeEnum = struct {
     methods: []const TypeMethod,
 };
 
+pub const TypeImplField = struct {
+    name: Symbol,
+    typ: *const Type,
+};
+
+pub const Impl = struct {
+    field_map: std.StringHashMap(usize),
+    fields: []const TypeImplField,
+    method_map: std.StringHashMap(usize),
+    methods: []const TypeMethod,
+    
+    pub fn init(allocator: std.mem.Allocator, fields: []const TypeImplField, methods: []const TypeMethod) Impl {
+        var field_map = std.StringHashMap(usize).init(allocator);
+        
+        for (fields, 0..) |field, i| {
+            field_map.put(field.name.text, i) catch unreachable;
+        }
+        
+        var method_map = std.StringHashMap(usize).init(allocator);
+        
+        for (methods, 0..) |method, i| {
+            method_map.put(method.name.text, i) catch unreachable;
+        }
+        
+        return .{
+            .field_map = field_map,
+            .fields = fields,
+            .method_map = method_map,
+            .methods = methods,
+        };
+    }
+};
+
 pub const TypeId = u64;
 
 pub const Type = struct {
@@ -295,7 +328,7 @@ pub const Type = struct {
             TypeKind.array => {
                 if (self.value.array.child.kind == .unknown) return true;
                 
-                return self.value.array.child.isSame(other.value.array.child);
+                return self.value.array.child.canBeAssignedTo(other.value.array.child);
             },
             TypeKind.@"enum" => { return false; },
             TypeKind.@"struct" => { return false; },
@@ -404,6 +437,8 @@ pub const Type = struct {
         if ((self.kind == .numeric or self.kind == .voidptr)
             and (other.kind == .numeric or other.kind == .voidptr)) return true;
         
+        if (self.kind == .voidptr and other.kind == .pointer) return true;
+        
         if (self.kind == .pointer and self.value.pointer.child.kind == .numeric
             and self.value.pointer.child.value.numeric == .u8
             and other.kind == .string) return true;
@@ -506,12 +541,17 @@ pub const Type = struct {
         }
     }
     
-    pub fn assignTo(self: *const Type, to: *const Type) *const Type {
+    pub fn assignTo(self: *const Type, to: *const Type, type_manager: *TypeManager) *const Type {
         // TODO: Convert type do destination type
         // For example: const x: []u32 = .[1, 2, 3]
         // The type should be sized array
         
-        _ = self;
+        if (self.kind == .array and to.kind == .array) {
+            if (self.value.array.child.type_id != to.value.array.child.type_id) {
+                return type_manager.createArray(to.value.array.child, to.value.array.is_dyn, to.value.array.len);
+            }
+        }
+        
         return to;
     }
     

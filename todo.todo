@@ -12,7 +12,7 @@
 ☐ Check import symbol collision (sementara bakal ke-resolve yang terakhir diimport)
 ☐ Analyze identifier usage, kalau gak kepake gak usah generate
 ☐ Scope masih nge-leak, gak di-free sama sekali
-☐ Function default argument
+✔ Function default argument @done(26-04-24 04:24)
 ☐ Enum field & member StringHashmap
 ☐ Generic function
 

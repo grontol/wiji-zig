@@ -1,0 +1,95 @@
+import "std"
+
+struct Scope {
+    id: i32
+    depth: i32
+    sum: i32
+}
+
+fn main() {
+    const input = .[0, 2, 5, 0, 2, 3, 3, 2, 1, 2, 10, 1]
+    var ip = 0
+    var output: [dyn]i32 = .[]
+    var stack: [dyn]Scope = .[.{0, 0, 0}]
+    var stackId = 0
+    
+    while ip < input.len {
+        const op = input[ip]
+        
+        switch op {
+            0 => {
+                stack.append(.{ stackId + 1, stack[stack.len - 1].depth + 1, 0 })
+                stackId += 1
+            },
+            1 => {
+                if stack.len <= 1 {
+                    print("INVALID\n")
+                    return
+                }
+                
+                const popped = stack[stack.len - 1]                
+                stack.len -= 1
+                
+                if popped.sum > 0 {
+                    output.append(popped.id)
+                    output.append(popped.sum)
+                }
+                
+                stack[stack.len - 1].sum += popped.sum
+            },
+            2 => {
+                if ip + 1 >= input.len {
+                    print("INVALID\n")
+                    return
+                }
+                
+                const v = input[ip + 1]
+                stack[stack.len - 1].sum += v
+                
+                ip += 1
+            },
+            3 => {
+                if ip + 1 >= input.len {
+                    print("INVALID\n")
+                    return
+                }
+                
+                const m = input[ip + 1]
+                stack[stack.len - 1].sum *= m
+                
+                ip += 1
+            },
+            else => {
+                print("INVALID\n")
+                return
+            }
+        }
+        
+        ip += 1
+    }
+    
+    if stack.len != 1 {
+        print("INVALID\n")
+        return
+    }
+    
+    printArray(output)
+}
+
+fn printArray<T>(arr: [dyn]T) {
+    print("[")
+    
+    for i in arr.len {
+        if i > 0 {
+            print(", ")
+        }
+        
+        print("{}", arr[i])
+    }
+    
+    print("]\n")
+}
+
+/***
+[2, 6, 1, 21]
+***/

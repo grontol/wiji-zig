@@ -6,6 +6,7 @@ extern pub fn realloc(ptr: voidptr, size: usize): voidptr
 extern pub fn memcpy(dest: voidptr, src: voidptr, n: usize): voidptr
 extern pub fn rand(): i32
 extern pub fn strlen(str: cstring): usize
+extern pub fn exit(code: i32)
 
 const SEEK_SET = 0
 const SEEK_CUR = 1
@@ -17,7 +18,7 @@ extern fn fseek(stream: voidptr, offset: i64, whence: i32): i32
 extern fn ftell(stream: voidptr): i64
 extern fn fread(ptr: voidptr, size: usize, n: usize, stream: voidptr): usize
 
-pub fn readEntireFile(path: cstring): String {
+pub fn readEntireFile(path: cstring): string {
     const f = fopen(path, "rb"c)
     
     fseek(f, 0, SEEK_END)
@@ -31,30 +32,27 @@ pub fn readEntireFile(path: cstring): String {
     
     fclose(f)
     
-    return .{ data = data, len = size }
+    return @string(data, size)
 }
 
-pub struct String {
-    data: *u8
+pub impl string {
+    ptr: *u8
     len: usize
     
     pub fn fromCString(str: cstring): @Self {
-        return .{
-            data = str,
-            len = strlen(str),
-        }
+        return @string(str, strlen(str))
     }
     
     pub fn split(self: @Self, delimiter: u8): []@Self {
-        val res: [dyn]String = .[]
+        val res: [dyn]string = .[]
         
         var start: usize = 0
         var len: usize = 0
         var i: usize = 0
         
         while i < self.len {
-            if self.data[i] == delimiter {
-                res.append(.{ data = self.data + start, len = len })
+            if self.ptr[i] == delimiter {
+                res.append(@string(self.ptr + start,len))
                 start = i + 1
                 len = 0
             }
@@ -65,7 +63,7 @@ pub struct String {
             i += 1
         }
         
-        res.append(.{ data = self.data + start, len = len })
+        res.append(@string(self.ptr + start,len))
         
         return res.toArray()
     }
@@ -74,30 +72,30 @@ pub struct String {
         var aLen = len
         if aLen == 0 aLen = self.len - start
         
-        return .{ data = self.data + start, len = aLen }
+        return @string(self.ptr + start, aLen)
     }
     
     pub fn toUpper(self: @Self): @Self {
         var newData: *u8 = malloc(self.len)
         
         for i in 0..self.len {
-            if self.data[i] >= 'a' && self.data[i] <= 'z' {
-                newData[i] = self.data[i] - 32
+            if self.ptr[i] >= 'a' && self.ptr[i] <= 'z' {
+                newData[i] = self.ptr[i] - 32
             }
             else {
-                newData[i] = self.data[i]
+                newData[i] = self.ptr[i]
             }
         }
         
-        return .{ data = newData, len = self.len }
+        return @string(newData, self.len)
     }
     
     pub fn toInt(self: @Self): i32 {
         var res = 0
         
         for i in 0..self.len {
-            if self.data[i] >= '0' && self.data[i] <= '9' {
-                const x = self.data[i] - '0'
+            if self.ptr[i] >= '0' && self.ptr[i] <= '9' {
+                const x = self.ptr[i] - '0'
                 res = res * 10 + x as i32
             }
             else {

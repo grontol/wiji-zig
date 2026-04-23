@@ -153,6 +153,29 @@ pub const FmtPrinter = struct {
         self.pushStringIfValid();
     }
     
+    fn pushArrayValue(self: *FmtPrinter, arr: *const tast.Expr) void {
+        self.appendToCurStr("[");
+        
+        
+        // const arr_acc: tast.Expr = .{
+        //     .typ = arr.typ.value.array.child,
+        //     .comptime_known = arr.comptime_known,
+        //     .mutability = .immutable,
+        //     .value = .{ .array_index = .{
+        //         .callee = arr,
+        //         .index = tast.Expr{
+        //             .comptime_known = arr.comptime_known,
+        //             .mutability = .immutable,
+        //             .value = .{ .literal = .{ .int = 0 } }
+        //         },
+        //     }},
+        // };
+        
+        self.appendToCurStr("]");
+        self.pushStringIfValid();
+        _ = arr;
+    }
+    
     fn pushValueByExpr(self: *FmtPrinter, expr: *const tast.Expr, pretty: bool) void {
         switch (expr.typ.kind) {
             .numeric => {
@@ -169,8 +192,14 @@ pub const FmtPrinter = struct {
             .bool => {
                 self.pushValue(.bool, expr);
             },
+            .array => {
+                self.pushArrayValue(expr);
+            },
             .@"struct" => {
                 self.pushStructValue(expr, pretty);
+            },
+            .@"enum" => {
+                self.pushValue(.int, expr);
             },
             else => {
                 std.debug.panic("TODO: print fmt {s}", .{@tagName(expr.typ.kind)});
