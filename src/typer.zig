@@ -3239,6 +3239,8 @@ const Typer = struct {
         
         for (field_states, 0..) |field_state, i| {
             if (field_state == .unresolved) {
+                
+                
                 self.reporter.reportErrorAtSpan(
                     span,
                     "Missing struct field `{s}` with type of `{s}`",
@@ -3645,7 +3647,7 @@ const Typer = struct {
     
     fn getTokenText(self: *Typer, token: Token) []const u8 {
         const src = self.file_manager.getContent(token.loc.file_id);
-        return src[token.loc.index..token.loc.index + token.loc.len];
+        return src[token.loc.start..token.loc.end];
     }
 };
 

@@ -11,13 +11,20 @@ const ANSI_GRAY =   "\x1b[0;2m";
 const ANSI_WHITE =  "\x1b[0;97m";
 const ANSI_RESET =  "\x1b[0m";
 
+const Diagnostic = struct {
+    
+};
+
+allocator: std.mem.Allocator,
 file_manager: *FileManager,
 compiler_options: CompilerOptions,
+diagnostics: std.ArrayList(Diagnostic) = .empty,
 
 const Self = @This();
 
-pub fn init(file_manager: *FileManager, compiler_options: CompilerOptions) Self {
+pub fn init(allocator: std.mem.Allocator, file_manager: *FileManager, compiler_options: CompilerOptions) Self {
     return .{
+        .allocator = allocator,
         .file_manager = file_manager,
         .compiler_options = compiler_options,
     };
@@ -28,8 +35,8 @@ pub fn reportErrorAtToken(self: Self, token: Token, comptime msg: []const u8, ar
         token.loc.file_id,
         token.loc.line,
         token.loc.col,
-        token.loc.index,
-        token.loc.index + token.loc.len,
+        token.loc.start,
+        token.loc.end,
         msg,
         args,
     );
@@ -40,8 +47,8 @@ pub fn reportErrorAfterToken(self: Self, token: Token, comptime msg: []const u8,
         token.loc.file_id,
         token.loc.line,
         token.loc.col,
-        token.loc.index,
-        token.loc.index + token.loc.len,
+        token.loc.start,
+        token.loc.end,
         msg,
         args,
     );

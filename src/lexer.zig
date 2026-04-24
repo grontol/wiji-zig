@@ -213,8 +213,8 @@ const Lexer = struct {
                     .kind = kind,
                     .loc = .{
                         .file_id = self.file_id,
-                        .index = start,
-                        .len = end - start,
+                        .start = start,
+                        .end = end,
                         .line = self.line,
                         .col = self.col,
                     },
@@ -347,8 +347,8 @@ const Lexer = struct {
             .kind = kind,
             .loc = .{
                 .file_id = self.file_id,
-                .index = start,
-                .len = end - start,
+                .start = start,
+                .end = end,
                 .line = self.line,
                 .col = self.col,
             },

@@ -439,7 +439,7 @@ pub const Printer = struct {
     
     fn tokenText(self: *Printer, token: Token) []const u8 {
         const src = self.file_manager.getContent(token.loc.file_id);
-        return src[token.loc.index..token.loc.index + token.loc.len];
+        return src[token.loc.start..token.loc.end];
     }
     
     fn blockBegin(self: *Printer, name: []const u8) void {

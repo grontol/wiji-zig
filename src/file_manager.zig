@@ -27,7 +27,7 @@ pub fn getFilename(self: *const Self, index: usize) []const u8 {
 
 pub fn getTokenText(self: *const Self, token: Token) []const u8 {
     const src = self.getContent(token.loc.file_id);
-    return src[token.loc.index..token.loc.index + token.loc.len];
+    return src[token.loc.start..token.loc.end];
 }
 
 pub fn loadContent(self: *Self, filename: []const u8) usize {

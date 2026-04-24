@@ -1973,7 +1973,7 @@ const Parser = struct {
     
     fn getTokenText(self: *Parser, token: Token) []const u8 {
         const src = self.file_manager.getContent(token.loc.file_id);
-        return src[token.loc.index..token.loc.index + token.loc.len];
+        return src[token.loc.start..token.loc.end];
     }
 };
 

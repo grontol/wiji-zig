@@ -1,11 +1,17 @@
-import "std"
+enum Time {
+    day,
+    night,
+}
 
 fn main() {
-    const c = '0' + 4
-    
-    print("{}\n", c)
+    const x = Foo.{}
+    var t: Time
 }
 
 fn foo() {
     
+}
+
+struct Foo {
+    x: i32
 }

@@ -130,17 +130,9 @@ pub const TokenKind = enum(u16) {
     }
 };
 
-pub const TokenLoc = struct {
-    file_id: usize,
-    index: usize,
-    len: usize,
-    line: usize,
-    col: usize,
-};
-
 pub const Token = struct {
     kind: TokenKind,
-    loc: TokenLoc,
+    loc: TokenSpan,
     has_nl_before: bool,
     
     pub fn default() Token {
@@ -148,8 +140,8 @@ pub const Token = struct {
             .kind = .None,
             .loc = .{
                 .file_id = 0,
-                .index = 0,
-                .len = 0,
+                .start = 0,
+                .end = 0,
                 .line = 0,
                 .col = 0,
             },
@@ -166,7 +158,7 @@ pub const Token = struct {
             self.loc.line,
             self.loc.col,
             @tagName(self.kind),
-            src[self.loc.index..(self.loc.index + self.loc.len)],
+            src[self.loc.start..self.loc.end],
         }) catch unreachable;
     }
 };
@@ -181,8 +173,8 @@ pub const TokenSpan = struct {
     pub fn from_token(token: Token) TokenSpan {
         return .{
             .file_id = token.loc.file_id,
-            .start = token.loc.index,
-            .end = token.loc.index + token.loc.len,
+            .start = token.loc.start,
+            .end = token.loc.end,
             .line = token.loc.line,
             .col = token.loc.col,
         };
@@ -191,8 +183,8 @@ pub const TokenSpan = struct {
     pub fn from_tokens(start: Token, end: Token) TokenSpan {
         return .{
             .file_id = start.loc.file_id,
-            .start = start.loc.index,
-            .end = end.loc.index + end.loc.len,
+            .start = start.loc.start,
+            .end = end.loc.end,
             .line = start.loc.line,
             .col = start.loc.col,
         };
@@ -201,7 +193,7 @@ pub const TokenSpan = struct {
     pub fn from_token_and_span(token: Token, end: TokenSpan) TokenSpan {
         return .{
             .file_id = token.loc.file_id,
-            .start = token.loc.index,
+            .start = token.loc.start,
             .end = end.end,
             .line = token.loc.line,
             .col = token.loc.col,
@@ -212,7 +204,7 @@ pub const TokenSpan = struct {
         return .{
             .file_id = start.file_id,
             .start = start.start,
-            .end = end.loc.index + end.loc.len,
+            .end = end.loc.end,
             .line = start.line,
             .col = start.col,
         };

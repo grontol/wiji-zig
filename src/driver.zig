@@ -45,7 +45,7 @@ pub const Driver = struct {
         type_manager.* = TypeManager.init(allocator, allocator);
         
         const reporter = allocator.create(Reporter) catch unreachable;
-        reporter.* = Reporter.init(file_manager, options);
+        reporter.* = Reporter.init(allocator, file_manager, options);
         
         return .{
             .allocator = allocator,
