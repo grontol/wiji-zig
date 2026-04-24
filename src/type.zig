@@ -3,6 +3,31 @@ const Token = @import("token.zig").Token;
 const Symbol = @import("symbol.zig").Symbol;
 const Reporter = @import("reporter.zig");
 
+pub const UNKNOWN       = &Type{ .size = 0,  .alignment = 0, .type_id = 0,  .hash = 0,  .kind = .unknown, .value = .unknown };
+pub const VOID          = &Type{ .size = 0,  .alignment = 0, .type_id = 1,  .hash = 1,  .kind = .void,    .value = .void };
+pub const U8            = &Type{ .size = 1,  .alignment = 1, .type_id = 2,  .hash = 2,  .kind = .numeric, .value = .{ .numeric = .u8 } };
+pub const U16           = &Type{ .size = 2,  .alignment = 2, .type_id = 3,  .hash = 3,  .kind = .numeric, .value = .{ .numeric = .u16 } };
+pub const U32           = &Type{ .size = 4,  .alignment = 4, .type_id = 4,  .hash = 4,  .kind = .numeric, .value = .{ .numeric = .u32 } };
+pub const U64           = &Type{ .size = 8,  .alignment = 8, .type_id = 5,  .hash = 5,  .kind = .numeric, .value = .{ .numeric = .u64 } };
+pub const USize         = &Type{ .size = 8,  .alignment = 8, .type_id = 6,  .hash = 6,  .kind = .numeric, .value = .{ .numeric = .usize } };
+pub const I8            = &Type{ .size = 1,  .alignment = 1, .type_id = 7,  .hash = 6,  .kind = .numeric, .value = .{ .numeric = .i8 } };
+pub const I16           = &Type{ .size = 2,  .alignment = 2, .type_id = 8,  .hash = 7,  .kind = .numeric, .value = .{ .numeric = .i16 } };
+pub const I32           = &Type{ .size = 4,  .alignment = 4, .type_id = 9,  .hash = 8,  .kind = .numeric, .value = .{ .numeric = .i32 } };
+pub const I64           = &Type{ .size = 8,  .alignment = 8, .type_id = 10, .hash = 9,  .kind = .numeric, .value = .{ .numeric = .i64 } };
+pub const F32           = &Type{ .size = 4,  .alignment = 4, .type_id = 11, .hash = 11, .kind = .numeric, .value = .{ .numeric = .f32 } };
+pub const F64           = &Type{ .size = 8,  .alignment = 8, .type_id = 12, .hash = 12, .kind = .numeric, .value = .{ .numeric = .f64 } };
+pub const UNTYPED_INT   = &Type{ .size = 8,  .alignment = 8, .type_id = 13, .hash = 13, .kind = .numeric, .value = .{ .numeric = .untyped_int } };
+pub const UNTYPED_FLOAT = &Type{ .size = 8,  .alignment = 8, .type_id = 14, .hash = 14, .kind = .numeric, .value = .{ .numeric = .untyped_float } };
+pub const CHAR          = &Type{ .size = 1,  .alignment = 1, .type_id = 15, .hash = 15, .kind = .numeric, .value = .{ .numeric = .char } };
+pub const STRING        = &Type{ .size = 16, .alignment = 8, .type_id = 16, .hash = 16, .kind = .string,  .value = .string };
+pub const CSTRING       = &Type{ .size = 8,  .alignment = 8, .type_id = 17, .hash = 17, .kind = .cstring, .value = .cstring };
+pub const BOOL          = &Type{ .size = 1,  .alignment = 1, .type_id = 18, .hash = 18, .kind = .bool,    .value = .bool };
+pub const RANGE         = &Type{ .size = 8,  .alignment = 4, .type_id = 19, .hash = 19, .kind = .range,   .value = .range };
+pub const ANY           = &Type{ .size = 8,  .alignment = 8, .type_id = 20, .hash = 20, .kind = .any,     .value = .any };
+pub const UNKNOWN_ENUM  = &Type{ .size = 0,  .alignment = 0, .type_id = 21, .hash = 21, .kind = .unknown_enum, .value = .unknown_enum };
+pub const TYPE_PARAM    = &Type{ .size = 0,  .alignment = 0, .type_id = 22, .hash = 22, .kind = .type_param, .value = .type_param };
+pub const VOID_PTR      = &Type{ .size = 8,  .alignment = 8, .type_id = 23, .hash = 23, .kind = .voidptr, .value = .voidptr };
+
 const TYPE_FLAG_INT       = (1 << (8 + 0));
 const TYPE_FLAG_UNSIGNED  = (1 << (8 + 1));
 const TYPE_FLAG_FLOAT     = (1 << (8 + 2));
@@ -19,6 +44,7 @@ pub const NumericKind = enum(u16) {
     u32,
     u64,
     usize,
+    char,
     
     f32 = TYPE_FLAG_FLOAT,
     f64,
@@ -712,6 +738,7 @@ pub const Type = struct {
                     NumericKind.u32           => { out.appendSlice(allocator, "u32") catch unreachable; },
                     NumericKind.u64           => { out.appendSlice(allocator, "u64") catch unreachable; },
                     NumericKind.usize         => { out.appendSlice(allocator, "usize") catch unreachable; },
+                    NumericKind.char          => { out.appendSlice(allocator, "char") catch unreachable; },
                     NumericKind.i8            => { out.appendSlice(allocator, "i8") catch unreachable; },
                     NumericKind.i16           => { out.appendSlice(allocator, "i16") catch unreachable; },
                     NumericKind.i32           => { out.appendSlice(allocator, "i32") catch unreachable; },
@@ -827,30 +854,6 @@ pub const Type = struct {
         }
     }
 };
-
-pub const UNKNOWN       = &Type{ .size = 0,  .alignment = 0, .type_id = 0,  .hash = 0,  .kind = .unknown, .value = .unknown };
-pub const VOID          = &Type{ .size = 0,  .alignment = 0, .type_id = 1,  .hash = 1,  .kind = .void,    .value = .void };
-pub const U8            = &Type{ .size = 1,  .alignment = 1, .type_id = 2,  .hash = 2,  .kind = .numeric, .value = .{ .numeric = .u8 } };
-pub const U16           = &Type{ .size = 2,  .alignment = 2, .type_id = 3,  .hash = 3,  .kind = .numeric, .value = .{ .numeric = .u16 } };
-pub const U32           = &Type{ .size = 4,  .alignment = 4, .type_id = 4,  .hash = 4,  .kind = .numeric, .value = .{ .numeric = .u32 } };
-pub const U64           = &Type{ .size = 8,  .alignment = 8, .type_id = 5,  .hash = 5,  .kind = .numeric, .value = .{ .numeric = .u64 } };
-pub const USize         = &Type{ .size = 8,  .alignment = 8, .type_id = 6,  .hash = 6,  .kind = .numeric, .value = .{ .numeric = .usize } };
-pub const I8            = &Type{ .size = 1,  .alignment = 1, .type_id = 7,  .hash = 6,  .kind = .numeric, .value = .{ .numeric = .i8 } };
-pub const I16           = &Type{ .size = 2,  .alignment = 2, .type_id = 8,  .hash = 7,  .kind = .numeric, .value = .{ .numeric = .i16 } };
-pub const I32           = &Type{ .size = 4,  .alignment = 4, .type_id = 9,  .hash = 8,  .kind = .numeric, .value = .{ .numeric = .i32 } };
-pub const I64           = &Type{ .size = 8,  .alignment = 8, .type_id = 10, .hash = 9,  .kind = .numeric, .value = .{ .numeric = .i64 } };
-pub const F32           = &Type{ .size = 4,  .alignment = 4, .type_id = 11, .hash = 11, .kind = .numeric, .value = .{ .numeric = .f32 } };
-pub const F64           = &Type{ .size = 8,  .alignment = 8, .type_id = 12, .hash = 12, .kind = .numeric, .value = .{ .numeric = .f64 } };
-pub const UNTYPED_INT   = &Type{ .size = 8,  .alignment = 8, .type_id = 13, .hash = 13, .kind = .numeric, .value = .{ .numeric = .untyped_int } };
-pub const UNTYPED_FLOAT = &Type{ .size = 8,  .alignment = 8, .type_id = 14, .hash = 14, .kind = .numeric, .value = .{ .numeric = .untyped_float } };
-pub const STRING        = &Type{ .size = 16, .alignment = 8, .type_id = 15, .hash = 15, .kind = .string,  .value = .string };
-pub const CSTRING       = &Type{ .size = 8,  .alignment = 8, .type_id = 16, .hash = 16, .kind = .cstring, .value = .cstring };
-pub const BOOL          = &Type{ .size = 1,  .alignment = 1, .type_id = 17, .hash = 17, .kind = .bool,    .value = .bool };
-pub const RANGE         = &Type{ .size = 8,  .alignment = 4, .type_id = 18, .hash = 18, .kind = .range,   .value = .range };
-pub const ANY           = &Type{ .size = 8,  .alignment = 8, .type_id = 19, .hash = 19, .kind = .any,     .value = .any };
-pub const UNKNOWN_ENUM  = &Type{ .size = 0,  .alignment = 0, .type_id = 20, .hash = 20, .kind = .unknown_enum, .value = .unknown_enum };
-pub const TYPE_PARAM    = &Type{ .size = 0,  .alignment = 0, .type_id = 21, .hash = 21, .kind = .type_param, .value = .type_param };
-pub const VOID_PTR      = &Type{ .size = 8,  .alignment = 8, .type_id = 22, .hash = 22, .kind = .voidptr, .value = .voidptr };
 
 pub const TypeManager = struct {
     arena: std.mem.Allocator,

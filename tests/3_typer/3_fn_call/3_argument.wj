@@ -22,7 +22,7 @@ Module {
                             <int> 10,
                             <float> 10,
                             <string> "str",
-                            <u8> '\n',
+                            <char> '\n',
                         ],
                         return_type: void,
                     },

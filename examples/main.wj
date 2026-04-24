@@ -1,43 +1,11 @@
 import "std"
 
 fn main() {
-    const arr: [dyn]i32 = .[3]
+    const c = '0' + 4
     
-    arr.push(4)
-    arr.push(5)
-    arr.push(6)
-    
-    for a in arr {
-        print("{}\n", a)
-    }
+    print("{}\n", c)
 }
 
-impl [dyn]i32 {
-    fn push(self: &@Self, value: i32) {
-        if self.len + 1 > self.cap {
-            var new_cap: usize
-            if self.cap == 0 new_cap = 16
-            else new_cap = self.cap * 2
-            
-            while new_cap < self.len new_cap *= 2
-            
-            var new_ptr: *i32
-            if self.cap == 0 {
-                new_ptr = malloc(new_cap * @sizeOf(i32))
-                
-                for i in self.len {
-                    new_ptr[i] = self.ptr[i]
-                }
-            }
-            else {
-                new_ptr = realloc(self.ptr, new_cap * @sizeOf(i32))
-            }
-            
-            self.ptr = new_ptr
-            self.cap = new_cap
-        }
-        
-        self.ptr[self.len] = value
-        self.len += 1
-    }
+fn foo() {
+    
 }

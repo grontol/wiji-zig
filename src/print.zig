@@ -179,7 +179,10 @@ pub const FmtPrinter = struct {
     fn pushValueByExpr(self: *FmtPrinter, expr: *const tast.Expr, pretty: bool) void {
         switch (expr.typ.kind) {
             .numeric => {
-                if (expr.typ.value.numeric.isFloat()) {
+                if (expr.typ.value.numeric == .char) {
+                    self.pushValue(.char, expr);
+                }
+                else if (expr.typ.value.numeric.isFloat()) {
                     self.pushValue(.float, expr);
                 }
                 else {

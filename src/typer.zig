@@ -2093,7 +2093,7 @@ const Typer = struct {
                 return tast.Expr{
                     .comptime_known = true,
                     .mutability = .constant,
-                    .typ = types.U8,
+                    .typ = types.CHAR,
                     .value = .{ .literal = .{ .char = value } },
                 };
             },
@@ -2219,6 +2219,10 @@ const Typer = struct {
                 const rhs_kind = rhs.typ.value.numeric;
                 
                 if (lhs_kind == rhs_kind) {
+                    typ = lhs.typ;
+                    valid = true;
+                }
+                else if (lhs_kind.isUnsigned() == rhs_kind.isUnsigned() and lhs_kind.isInt() == rhs_kind.isInt() and lhs.typ.size == rhs.typ.size) {
                     typ = lhs.typ;
                     valid = true;
                 }

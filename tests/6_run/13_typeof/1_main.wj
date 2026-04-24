@@ -52,7 +52,7 @@ fn main() {
 @typeOf(y) = f32
 @typeOf(foo) = Foo
 @typeOf(str) = string
-@typeOf(chr) = u8
+@typeOf(chr) = char
 @typeOf(Foo) = type(struct:Foo)
 @typeOf(Foo.foo) = fn(): void
 @typeOf(Foo.bar) = fn(&Foo): void
