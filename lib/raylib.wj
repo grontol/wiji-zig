@@ -205,6 +205,7 @@ extern(name = "GetFrameTime")          fn getFrameTime(): f32
 extern(name = "MeasureText")           fn measureText(text: cstring, fontSize: i32): i32
 
 extern(name = "DrawRectangle")         fn drawRectangle(x: i32, y: i32, w: i32, h: i32, color: Color)
+extern(name = "DrawRectangleV")        fn drawRectangleV(position: Vector2, size: Vector2, color: Color)
 extern(name = "DrawRectanglePro")      fn drawRectanglePro(rec: Rectangle, origin: Vector2, rotation: f32, color: Color)
 extern(name = "DrawLine")              fn drawLine(x1: i32, y1: i32, x2: i32, y2: i32, color: Color)
 

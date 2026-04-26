@@ -364,7 +364,8 @@ const Parser = struct {
             TokenKind.CharLit,
             TokenKind.Identifier,
             TokenKind.TrueLit,
-            TokenKind.FalseLit => {
+            TokenKind.FalseLit,
+            TokenKind.NullLit => {
                 switch (token.kind) {
                     TokenKind.IntLit     => { expr = ast.Literal.create_expr(ast.LitKind.Int, self.ts.next()); },
                     TokenKind.IntBinLit  => { expr = ast.Literal.create_expr(ast.LitKind.IntBin, self.ts.next()); },
@@ -376,6 +377,7 @@ const Parser = struct {
                     TokenKind.CharLit    => { expr = ast.Literal.create_expr(ast.LitKind.Char, self.ts.next()); },
                     TokenKind.TrueLit    => { expr = ast.Literal.create_expr(ast.LitKind.True, self.ts.next()); },
                     TokenKind.FalseLit   => { expr = ast.Literal.create_expr(ast.LitKind.False, self.ts.next()); },
+                    TokenKind.NullLit    => { expr = ast.Literal.create_expr(ast.LitKind.Null, self.ts.next()); },
                     
                     TokenKind.Identifier => {
                         if (self.ts.peekN(2).kind == .Dot and self.ts.peekN(3).kind == .OpenCurlyBracket) {
@@ -1380,7 +1382,8 @@ const Parser = struct {
     
     fn parseMemberAccess(self: *Parser, callee: ast.Expr) ast.Expr {
         _ = self.ts.nextExpect(.Dot);
-        const member_token = self.ts.nextExpect(.Identifier);
+        
+        const member_token = self.ts.nextExpectAny(&.{ .Identifier, .QMark, .Mul });
         
         return .{
             .span = TokenSpan.from_span_and_token(callee.span, member_token),

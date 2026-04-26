@@ -92,6 +92,7 @@ pub const TokenKind = enum(u16) {
     CharLit,
     TrueLit,
     FalseLit,
+    NullLit,
     
     Identifier = TAG_OTHER << 8,
     

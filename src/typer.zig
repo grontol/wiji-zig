@@ -1190,7 +1190,8 @@ const Typer = struct {
         switch (lhs.value) {
             .identifier,
             .array_index,
-            .struct_member => {
+            .struct_member,
+            .dereferenc_of => {
                 is_lvalue = true;
             },
             .builtin => {
@@ -2169,6 +2170,14 @@ const Typer = struct {
                     .value = .{ .literal = .{ .bool = lit.kind == ast.LitKind.True } },
                 };
             },
+            ast.LitKind.Null => {
+                return tast.Expr{
+                    .comptime_known = true,
+                    .mutability = .constant,
+                    .typ = types.NULL,
+                    .value = .{ .literal = .null },
+                };
+            },
         }
     }
     
@@ -2511,6 +2520,19 @@ const Typer = struct {
         }
         else if (lhs.typ.kind == .string and rhs.typ.kind == .string) {
             switch (bin.op.kind) {
+                .EqEq,
+                .NotEq => {
+                    return .{
+                        .comptime_known = lhs.comptime_known and rhs.comptime_known,
+                        .mutability = .constant,
+                        .typ = types.BOOL,
+                        .value = .{.string_eq = .{
+                            .lhs = self.makeExprPointer(lhs),
+                            .rhs = self.makeExprPointer(rhs),
+                            .is_eq = bin.op.kind == .EqEq,
+                        }},
+                    };
+                },
                 .PlusPlus => {
                     if (lhs.comptime_known and rhs.comptime_known) {
                         return .{
@@ -2536,6 +2558,16 @@ const Typer = struct {
                 .Minus => {
                     valid = true;
                     typ = lhs.typ;
+                },
+                else => {},
+            }
+        }
+        else if (lhs.typ.kind == .nullable and rhs.typ.kind == .null or lhs.typ.kind == .null and rhs.typ.kind == .nullable) {
+            switch (bin.op.kind) {
+                .EqEq,
+                .NotEq => {
+                    valid = true;
+                    typ = types.BOOL;
                 },
                 else => {},
             }
@@ -2746,8 +2778,40 @@ const Typer = struct {
     }
     
     fn typeMemberAccess(self: *Typer, scope: *Scope, mem: *const ast.MemberAccess) tast.Expr {
-        const callee = self.makeExprPointer(self.typeExpr(scope, mem.callee, types.UNKNOWN));
+        var callee = self.makeExprPointer(self.typeExpr(scope, mem.callee, types.UNKNOWN));
         const member_text = self.getTokenText(mem.member);
+        
+        if (std.mem.eql(u8, member_text, "?")) {
+            if (callee.typ.kind != .nullable) {
+                self.reporter.reportErrorAtToken(mem.member, "Only nullable types can be accessed with `.?`", .{});
+            }
+            
+            return .{
+                .typ = callee.typ.value.nullable.child,
+                .mutability = .immutable,
+                .value = .{ .null_access = .{ .value = callee } },
+            };
+        }
+        
+        if (std.mem.eql(u8, member_text, "*")) {
+            var child_typ: *const Type = undefined;
+            
+            if (callee.typ.kind == .pointer) {
+                child_typ = callee.typ.value.pointer.child;
+            }
+            else if (callee.typ.kind == .reference) {
+                child_typ = callee.typ.value.reference.child;
+            }
+            else {
+                self.reporter.reportErrorAtToken(mem.member, "Only ponter or reference types can be accessed with `.*`", .{});
+            }
+            
+            return .{
+                .typ = child_typ,
+                .mutability = .mutable,
+                .value = .{ .dereferenc_of = .{ .typ = child_typ, .value = callee } },
+            };
+        }
         
         if (scope.getImplField(callee.typ.type_id, member_text)) |field| {
             self.symbol_manager.addUsage(field.name, self.getParentSymbol());
@@ -3622,6 +3686,11 @@ const Typer = struct {
                     self.typeType(scope, typ.value.pointer.child)
                 );
             },
+            ast.TypeKind.nullable => {
+                return self.type_manager.createNullable(
+                    self.typeType(scope, typ.value.nullable.child)
+                );
+            },
             ast.TypeKind.inline_struct => {
                 const struct_decl = &typ.value.inline_struct;
                 
@@ -3670,6 +3739,7 @@ const Typer = struct {
         else if (std.mem.eql(u8, typ_text, "bool"))    { return types.BOOL; }
         else if (std.mem.eql(u8, typ_text, "string"))  { return types.STRING; }
         else if (std.mem.eql(u8, typ_text, "cstring")) { return types.CSTRING; }
+        else if (std.mem.eql(u8, typ_text, "char"))    { return types.CHAR; }
         else if (std.mem.eql(u8, typ_text, "range"))   { return types.RANGE; }
         
         else if (std.mem.eql(u8, typ_text, "void"))    { return types.VOID; }

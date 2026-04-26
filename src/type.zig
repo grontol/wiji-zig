@@ -27,6 +27,7 @@ pub const ANY           = &Type{ .size = 8,  .alignment = 8, .type_id = 20, .has
 pub const UNKNOWN_ENUM  = &Type{ .size = 0,  .alignment = 0, .type_id = 21, .hash = 21, .kind = .unknown_enum, .value = .unknown_enum };
 pub const TYPE_PARAM    = &Type{ .size = 0,  .alignment = 0, .type_id = 22, .hash = 22, .kind = .type_param, .value = .type_param };
 pub const VOID_PTR      = &Type{ .size = 8,  .alignment = 8, .type_id = 23, .hash = 23, .kind = .voidptr, .value = .voidptr };
+pub const NULL          = &Type{ .size = 8,  .alignment = 8, .type_id = 24, .hash = 24, .kind = .null, .value = .null };
 
 const TYPE_FLAG_INT       = (1 << (8 + 0));
 const TYPE_FLAG_UNSIGNED  = (1 << (8 + 1));
@@ -92,6 +93,7 @@ pub const TypeKind = enum {
     generic,
     typ,
     voidptr,
+    null,
 };
 
 pub const TypeFuncParam = struct {
@@ -289,6 +291,7 @@ pub const Type = struct {
             child: *const Type,
         },
         voidptr,
+        null,
     },
     size: u16,
     alignment: u16,
@@ -302,6 +305,8 @@ pub const Type = struct {
         if (self.isSame(other)) return true;
         if (self.kind == .voidptr and other.kind == .pointer or self.kind == .pointer and other.kind == .voidptr) return true;
         if (self.kind == .cstring and other.kind == .pointer and other.value.pointer.child.isChar()) return true;
+        if (self.kind == .null and other.kind == .nullable) return true;
+        if (other.kind == .nullable and self.isSame(other.value.nullable.child)) return true;
         if (self.kind != other.kind) return false;
         
         switch (self.kind) {
@@ -515,6 +520,9 @@ pub const Type = struct {
             TypeKind.pointer => {
                 return self.value.pointer.child.isSame(other.value.pointer.child);
             },
+            TypeKind.nullable => {
+                return self.value.nullable.child.isSame(other.value.nullable.child);
+            },
             TypeKind.@"struct" => {
                 if (self.value.@"struct".generic_base != null and other.value.@"struct".generic_base != null) {                    
                     if (self.value.@"struct".generic_base.?.type_id != other.value.@"struct".generic_base.?.type_id) return false;
@@ -600,7 +608,8 @@ pub const Type = struct {
             .any,
             .range,
             .func,
-            .voidptr => {
+            .voidptr,
+            .null => {
                 return self;
             },
             .@"struct" => {
@@ -731,6 +740,7 @@ pub const Type = struct {
             TypeKind.any          => { out.appendSlice(allocator, "any") catch unreachable; },
             TypeKind.range        => { out.appendSlice(allocator, "range") catch unreachable; },
             TypeKind.voidptr      => { out.appendSlice(allocator, "voidptr") catch unreachable; },
+            TypeKind.null         => { out.appendSlice(allocator, "null") catch unreachable; },
             TypeKind.numeric      => {
                 switch (self.value.numeric) {
                     NumericKind.u8            => { out.appendSlice(allocator, "u8") catch unreachable; },
@@ -814,6 +824,11 @@ pub const Type = struct {
             TypeKind.pointer => {
                 out.appendSlice(allocator, "*") catch unreachable;
                 self.value.pointer.child.getText(out, allocator);
+            },
+            
+            TypeKind.nullable => {
+                out.appendSlice(allocator, "?") catch unreachable;
+                self.value.nullable.child.getText(out, allocator);
             },
             
             TypeKind.generic => {
@@ -947,6 +962,34 @@ pub const TypeManager = struct {
             .type_id = self.cur_index,
             .hash = combineHash(@intFromEnum(TypeKind.pointer), child.hash),
             .value = .{.pointer = .{
+                .child = child,
+            }},
+        };
+        
+        const typ_ptr = self.type_map.get(typ);
+        
+        if (typ_ptr) |ptr| {
+            return ptr;
+        }
+        else {
+            const new_typ_ptr = self.arena.create(Type) catch unreachable;
+            new_typ_ptr.* = typ;
+            self.cur_index += 1;
+            
+            self.type_map.put(typ, new_typ_ptr) catch unreachable;
+            
+            return new_typ_ptr;
+        }
+    }
+    
+    pub fn createNullable(self: *TypeManager, child: *const Type) *const Type {
+        const typ = Type{
+            .kind = .nullable,
+            .size = 8,
+            .alignment = 8,
+            .type_id = self.cur_index,
+            .hash = combineHash(@intFromEnum(TypeKind.nullable), child.hash),
+            .value = .{.nullable = .{
                 .child = child,
             }},
         };

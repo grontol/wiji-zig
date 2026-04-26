@@ -1,0 +1,26 @@
+struct Node {
+    value: i32
+    next: ?&Node
+}
+
+fn main() {
+    const n3 = Node.{30, null}
+    const n2 = Node.{20, &n3}
+    const n1 = Node.{10, &n2}
+    
+    var current: ?&Node = &n1
+    
+    while current != null {
+        print("{} -> ", current.?.value)
+        
+        current = current.?.next
+    }
+    
+    print("NULL\n")
+}
+
+@builtin fn print(fmt: string, ...args: any)
+
+/***
+10 -> 20 -> 30 -> NULL
+***/

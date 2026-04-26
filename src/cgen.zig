@@ -36,6 +36,14 @@ const dyn_array_append_macro =
 \\} while(0)
 ;
 
+const string_eq_fn =
+\\int strncmp(const char * str1, const char * str2, size_t n);
+\\bool string_eq(string l, string r) {
+\\    if (l.len != r.len) return false;
+\\    return strncmp(l.ptr, r.ptr, l.len) == 0;
+\\}
+;
+
 const Cgen = struct {
     allocator: std.mem.Allocator,
     symbol_manager: *SymbolManager,
@@ -53,6 +61,7 @@ const Cgen = struct {
     generated_modules: std.AutoHashMap(usize, bool),
     
     dyn_array_append_generated: bool = false,
+    string_eq_generated: bool = false,
     
     fn init(allocator: std.mem.Allocator, symbol_manager: *SymbolManager) Cgen {
         return Cgen{
@@ -110,6 +119,19 @@ const Cgen = struct {
         self.cur_src = cur_src;
         
         self.dyn_array_append_generated = true;
+    }
+    
+    fn genStringEqFn(self: *Cgen) void {
+        if (self.string_eq_generated) return;
+        
+        const cur_src = self.cur_src;
+        
+        self.setToBuiltin();        
+        self.writeArgs("{s}", .{ string_eq_fn });
+        
+        self.cur_src = cur_src;
+        
+        self.string_eq_generated = true;
     }
     
     fn writeSymbol(self: *Cgen, symbol: *const Symbol) void {
@@ -684,6 +706,8 @@ const Cgen = struct {
             .cast          => |cast|    { self.genCast(&cast); },
             .referenc_of   => |refof|   { self.genReferenceOf(&refof); },
             .dereferenc_of => |derefof| { self.genDereferenceOf(&derefof); },
+            .null_access   => |null_ac| { self.genNullAccess(&null_ac); },
+            .string_eq     => |str_eq|  { self.genStringEq(&str_eq); },
             .string_concat => |str_cat| { self.genStringConcat(&str_cat); },
             .new_string    => |str|     { self.genNewString(&str); },
             .builtin       => |builtin| { self.genBuiltin(&builtin, &.{}); },
@@ -711,6 +735,7 @@ const Cgen = struct {
                     else => self.writeArgs("'{c}'", .{lit.char}),
                 }
             },
+            .null => self.write("NULL"),
         }
     }
     
@@ -1009,6 +1034,20 @@ const Cgen = struct {
         self.write(")");
     }
     
+    fn genNullAccess(self: *Cgen, null_ac: *const tast.NullAccess) void {
+        self.genExpr(null_ac.value);
+    }
+    
+    fn genStringEq(self: *Cgen, str_cat: *const tast.StringEq) void {
+        self.genStringEqFn();
+        
+        self.write("string_eq(");
+        self.genExpr(str_cat.lhs);
+        self.write(", ");
+        self.genExpr(str_cat.rhs);
+        self.write(")");
+    }
+    
     fn genStringConcat(self: *Cgen, str_cat: *const tast.StringConcat) void {
         self.genExpr(str_cat.lhs);
         self.write(" ");
@@ -1065,6 +1104,23 @@ const Cgen = struct {
             .pointer => {
                 self.genType(typ.value.pointer.child);
                 self.write("*");
+                return;
+            },
+            .nullable => {
+                if (typ.value.nullable.child.kind == .reference) {
+                    self.genType(typ.value.nullable.child.value.reference.child);
+                    self.write("*");
+                    return;
+                }
+                else if (typ.value.nullable.child.kind == .pointer) {
+                    self.genType(typ.value.nullable.child.value.pointer.child);
+                    self.write("*");
+                    return;
+                }
+                else {
+                    std.debug.panic("TODO: Nullable for non pointer", .{});
+                }
+                
                 return;
             },
             .voidptr => {
@@ -1128,7 +1184,13 @@ const Cgen = struct {
                     self.write("typedef struct {{ ");
                     
                     for (typ.value.@"struct".fields) |field| {
-                        self.genType(field.typ);
+                        if (field.typ.kind == .nullable and field.typ.value.nullable.child.kind == .reference) {
+                            self.write("void*");
+                        }
+                        else {
+                            self.genType(field.typ);
+                        }
+                        
                         self.writeArgs(" {s}; ", .{field.name.text});
                     }
                     

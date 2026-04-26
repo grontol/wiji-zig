@@ -242,6 +242,7 @@ pub const LitKind = enum {
     Char,
     True,
     False,
+    Null,
 };
 
 pub const Kind = enum {

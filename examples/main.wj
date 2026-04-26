@@ -1,11 +1,30 @@
-fn main() {
-    var xs: [dyn]i32 = .[]
-    daAppend(&xs, 1)
-    
-    var ys: [dyn]string = .[]
-    daAppend(&ys, "")
-}
+import "raylib"
 
-fn daAppend<T>(arr: &[dyn]T, value: T) {
+fn main() {
+    const screenWidth = 800
+    const screenHeight = 450
+
+    initWindow(screenWidth, screenHeight, "Bahasaku + Raylib Test"c)
+    setTargetFPS(60)
+
+    var ballPos = Vector2.{ x = 400.0, y = 225.0 }
     
+    while !windowShouldClose() {
+        // Update
+        if isKeyDown(KEY_RIGHT) { ballPos.x = ballPos.x + 2.0 }
+        if isKeyDown(KEY_LEFT)  { ballPos.x = ballPos.x - 2.0 }
+        if isKeyDown(KEY_UP)    { ballPos.y = ballPos.y - 2.0 }
+        if isKeyDown(KEY_DOWN)  { ballPos.y = ballPos.y + 2.0 }
+
+        // Draw
+        beginDrawing()
+        clearBackground(WHITE)
+        
+        drawText("Gerakkan bola dengan arrow keys!"c, 10, 10, 20, GRAY)
+        drawRectangleV(ballPos, .{ x = 50.0, y = 50.0 }, RED)
+        
+        endDrawing()
+    }
+
+    closeWindow()
 }

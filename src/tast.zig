@@ -242,6 +242,7 @@ pub const LiteralKind = enum {
     cstring,
     char,
     bool,
+    null,
 };
 
 pub const Literal = union(LiteralKind) {
@@ -251,6 +252,7 @@ pub const Literal = union(LiteralKind) {
     cstring: []const u8,
     char: u8,
     bool: bool,
+    null,
 };
 
 pub const Cast = struct {
@@ -266,6 +268,16 @@ pub const ReferenceOf = struct {
 pub const DereferenceOf = struct {
     value: *Expr,
     typ: *const Type,
+};
+
+pub const NullAccess = struct {
+    value: *Expr,
+};
+
+pub const StringEq = struct {
+    lhs: *Expr,
+    rhs: *Expr,
+    is_eq: bool,
 };
 
 pub const StringConcat = struct {
@@ -422,7 +434,9 @@ pub const ExprKind = enum {
     cast,
     referenc_of,
     dereferenc_of,
+    null_access,
     block,
+    string_eq,
     string_concat,
     builtin,
     new_string,
@@ -451,7 +465,9 @@ pub const Expr = struct {
         cast: Cast,
         referenc_of: ReferenceOf,
         dereferenc_of: DereferenceOf,
+        null_access: NullAccess,
         block: BlockExpr,
+        string_eq: StringEq,
         string_concat: StringConcat,
         builtin: Builtin,
         new_string: NewString,
@@ -830,6 +846,7 @@ pub const Printer = struct {
                 self.print("'{s}'", .{ch});
             },
             .bool => |v| { self.print("{}", .{v}); },
+            .null => |_| { self.print("null", .{}); },
         }
     }
     
