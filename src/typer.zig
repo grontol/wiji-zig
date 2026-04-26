@@ -75,7 +75,7 @@ const StructDeclData = struct {
     typ: *Type,
     ast: *const ast.StructDecl,
     scope: *Scope,
-    type_params: []const Symbol,
+    type_params: []const *Symbol,
 };
 
 const EnumDeclData = struct {
@@ -93,7 +93,7 @@ const ImplDeclData = struct {
 const Typer = struct {
     arena: std.mem.Allocator,
     temp_allocator: std.mem.Allocator,
-    reporter: *const Reporter,
+    reporter: *Reporter,
     file_manager: *const FileManager,
     type_manager: *TypeManager,
     symbol_manager: *SymbolManager,
@@ -110,15 +110,17 @@ const Typer = struct {
     cur_container_type: ?*const Type = null,
     
     generic_fn_decls: std.AutoHashMap(u64, *FnDeclData),
-    generic_fn_monomorphized: std.AutoHashMap(u64, Symbol),
+    generic_fn_monomorphized: std.AutoHashMap(u64, *Symbol),
     fn_decls: std.ArrayList(tast.FnDecl) = .empty,
     
     generic_structs: std.AutoHashMap(u64, *const Type),
     
+    parent_symbols: std.ArrayList(*Symbol) = .empty,
+    
     fn init(
         arena: std.mem.Allocator,
         temp_allocator: std.mem.Allocator,
-        reporter: *const Reporter,
+        reporter: *Reporter,
         file_manager: *const FileManager,
         type_manager: *TypeManager,
         symbol_manager: *SymbolManager,
@@ -134,7 +136,7 @@ const Typer = struct {
             .children = children,
             
             .generic_fn_decls = std.AutoHashMap(u64, *FnDeclData).init(temp_allocator),
-            .generic_fn_monomorphized = std.AutoHashMap(u64, Symbol).init(temp_allocator),
+            .generic_fn_monomorphized = std.AutoHashMap(u64, *Symbol).init(temp_allocator),
             
             .generic_structs = std.AutoHashMap(u64, *const Type).init(temp_allocator),
         };
@@ -144,6 +146,24 @@ const Typer = struct {
         self.generic_fn_decls.deinit();
         self.generic_fn_monomorphized.deinit();
         self.generic_structs.deinit();
+        self.parent_symbols.deinit(self.temp_allocator);
+    }
+    
+    fn getParentSymbol(self: *Typer) ?*Symbol {
+        if (self.parent_symbols.items.len > 0) {
+            return self.parent_symbols.items[self.parent_symbols.items.len - 1];
+        }
+        
+        return null;
+    }
+    
+    fn pushParentSymbol(self: *Typer, sym: *Symbol) void {
+        self.parent_symbols.append(self.temp_allocator, sym) catch unreachable;
+    }
+    
+    fn popParentSymbol(self: *Typer) void {
+        std.debug.assert(self.parent_symbols.items.len > 0);
+        _ = self.parent_symbols.pop();
     }
     
     fn typeModule(self: *Typer, scope: *Scope, module: *const ast.Module, module_id: usize, module_name: []const u8) tast.Module {        
@@ -392,14 +412,14 @@ const Typer = struct {
         var return_typ = types.VOID;
         
         const new_scope = scope.inheritWithMode(.local, scope.allocator);
-        var type_param_symbols: []Symbol = &.{};
+        var type_param_symbols: []*Symbol = &.{};
         
         if (fn_decl.type_params.len > 0) {
-            type_param_symbols = self.arena.alloc(Symbol, fn_decl.type_params.len) catch unreachable;
+            type_param_symbols = self.arena.alloc(*Symbol, fn_decl.type_params.len) catch unreachable;
             
             for (fn_decl.type_params, 0..) |p, i| {
                 const type_param_name = self.getTokenText(p);
-                const type_param_symbol = self.symbol_manager.createSymbol(p, false);
+                const type_param_symbol = self.symbol_manager.createSymbol(p, false, self.getParentSymbol());
                 const type_param_typ = self.type_manager.createTypeParam(type_param_symbol, i);
                 
                 new_scope.set(type_param_name, type_param_symbol, type_param_typ, true, .constant);
@@ -458,7 +478,7 @@ const Typer = struct {
                 self.reporter.reportErrorAtToken(param.name, "Non variadic param cannot be placed after variadic param", .{});
             }
             
-            const symbol = self.symbol_manager.createSymbol(param.name, false);
+            const symbol = self.symbol_manager.createSymbol(param.name, false, self.getParentSymbol());
             
             tast_params.appendAssumeCapacity(tast.FnParam{
                 .name = symbol,
@@ -477,8 +497,11 @@ const Typer = struct {
             return_typ = self.typeType(new_scope, &typ);
         }
         
-        const namespaced = if (fn_decl.is_extern or scope.mode == .module and std.mem.eql(u8, fn_name, "main")) false else true;
-        const fn_name_symbol = self.symbol_manager.createSymbol(fn_decl.name, namespaced);
+        const is_main = scope.mode == .module and std.mem.eql(u8, fn_name, "main");
+        const namespaced = if (fn_decl.is_extern or is_main) false else true;
+        const fn_name_symbol = self.symbol_manager.createSymbol(fn_decl.name, namespaced, self.getParentSymbol());
+        fn_name_symbol.is_main_fn = is_main;
+        
         const fn_typ = self.type_manager.createFn(
             fn_name_symbol,
             params.items,
@@ -518,6 +541,7 @@ const Typer = struct {
             scope.set(param.name.text, param.name, param.typ, false, .constant);
         }
         
+        self.pushParentSymbol(forward_decl.name);
         const parent_fn = self.cur_fn;
         self.cur_fn = forward_decl;
         
@@ -531,6 +555,7 @@ const Typer = struct {
         }
         
         self.cur_fn = parent_fn;
+        self.popParentSymbol();
     }
     
     fn typeBlockStmt(self: *Typer, scope: *Scope, block: *const ast.Block, dont_create_new_scope: bool) tast.Stmt {
@@ -613,8 +638,8 @@ const Typer = struct {
     }
     
     fn typeStructDeclForward(self: *Typer, scope: *Scope, decl: *const ast.StructDecl) StructDeclData {
-        const struct_symbol = if (decl.name) |name| self.symbol_manager.createSymbol(name, true)
-        else self.symbol_manager.createUnnamedSymbol("inline_struct", decl.struct_token, true);
+        const struct_symbol = if (decl.name) |name| self.symbol_manager.createSymbol(name, true, self.getParentSymbol())
+        else self.symbol_manager.createUnnamedSymbol("inline_struct", decl.struct_token, true, self.getParentSymbol());
         
         const struct_type = self.type_manager.createStructForward(struct_symbol);
         const struct_type_container = self.type_manager.createType(struct_type);
@@ -623,14 +648,14 @@ const Typer = struct {
         const new_scope = scope.inheritWithMode(.container, self.arena);
         
         var type_param_types = std.ArrayList(*Type).initCapacity(self.arena, decl.type_params.len) catch unreachable;
-        var type_param_symbols: []Symbol = &.{};
+        var type_param_symbols: []*Symbol = &.{};
         
         if (decl.type_params.len > 0) {
-            type_param_symbols = self.arena.alloc(Symbol, decl.type_params.len) catch unreachable;
+            type_param_symbols = self.arena.alloc(*Symbol, decl.type_params.len) catch unreachable;
             
             for (decl.type_params, 0..) |p, i| {
                 const type_param_name = self.getTokenText(p);
-                const type_param_symbol = self.symbol_manager.createSymbol(p, false);
+                const type_param_symbol = self.symbol_manager.createSymbol(p, false, self.getParentSymbol());
                 const type_param_typ = self.type_manager.createTypeParam(type_param_symbol, i);
                 
                 new_scope.set(type_param_name, type_param_symbol, type_param_typ, true, .constant);
@@ -656,7 +681,7 @@ const Typer = struct {
         var fields = std.ArrayList(types.TypeStructField).initCapacity(self.arena, decl.fields.len) catch unreachable;
         
         for (decl.fields) |field| {
-            const field_name_symbol = self.symbol_manager.createSymbol(field.name, false);
+            const field_name_symbol = self.symbol_manager.createSymbol(field.name, false, self.getParentSymbol());
             var field_typ: *const Type = undefined;
             var field_default_value: ?*tast.Expr = null;
             var has_type = false;
@@ -765,13 +790,13 @@ const Typer = struct {
     }
     
     fn typeEnumDecl(self: *Typer, scope: *Scope, decl: *const ast.EnumDecl) EnumDeclData {
-        const enum_symbol = if (decl.name) |name| self.symbol_manager.createSymbol(name, true)
-        else self.symbol_manager.createUnnamedSymbol("inline_enum", decl.enum_token, true);
+        const enum_symbol = if (decl.name) |name| self.symbol_manager.createSymbol(name, true, self.getParentSymbol())
+        else self.symbol_manager.createUnnamedSymbol("inline_enum", decl.enum_token, true, self.getParentSymbol());
         
-        var items = std.ArrayList(Symbol).initCapacity(self.arena, decl.items.len) catch unreachable;
+        var items = std.ArrayList(*Symbol).initCapacity(self.arena, decl.items.len) catch unreachable;
             
         for (decl.items) |item| {
-            const item_name_symbol = self.symbol_manager.createSymbol(item, false);
+            const item_name_symbol = self.symbol_manager.createSymbol(item, false, self.getParentSymbol());
             items.appendAssumeCapacity(item_name_symbol);
         }
         
@@ -855,7 +880,7 @@ const Typer = struct {
         var methods = std.ArrayList(types.TypeMethod).empty;
         
         for (decl.fields) |field| {
-            const field_name_symbol = self.symbol_manager.createSymbol(field.name, false);
+            const field_name_symbol = self.symbol_manager.createSymbol(field.name, false, self.getParentSymbol());
             const field_typ = self.typeType(scope, &field.typ);
             
             fields.appendAssumeCapacity(types.TypeImplField{
@@ -919,7 +944,7 @@ const Typer = struct {
             else => unreachable,
         };
         
-        const name_symbol = self.symbol_manager.createSymbol(var_decl.name, scope.mode != .local);
+        const name_symbol = self.symbol_manager.createSymbol(var_decl.name, scope.mode != .local, self.getParentSymbol());
         scope.set(name, name_symbol, typ, comptime_known, mutability);
         
         const kind: tast.VarDeclKind = switch (var_decl.decl.kind) {
@@ -948,6 +973,8 @@ const Typer = struct {
     
     fn typeVarDeclValue(self: *Typer, scope: *Scope, ast_decl: *const ast.VarDecl, tast_decl: *tast.VarDecl) void {
         if (ast_decl.value) |ast_value| {
+            self.pushParentSymbol(tast_decl.name);
+            
             var value = self.makeExprPointer(self.typeExpr(scope, ast_value, tast_decl.typ));
             tast_decl.value = value;
             
@@ -972,6 +999,8 @@ const Typer = struct {
             
             sym.?.typ = tast_decl.typ;
             sym.?.comptime_known = ast_decl.decl.kind == .KeywordConst and value.comptime_known;
+            
+            self.popParentSymbol();
         }
     }
     
@@ -1088,8 +1117,12 @@ const Typer = struct {
             typ = self.typeType(scope, &decl_typ);
         }
         
+        const name_symbol = self.symbol_manager.createSymbol(var_decl.name, scope.mode != .local, self.getParentSymbol());
+        
         if (var_decl.value) |decl_value| {
+            self.pushParentSymbol(name_symbol);
             value = self.makeExprPointer(self.typeExpr(scope, decl_value, typ));
+            self.popParentSymbol();
             
             if (typ.kind == types.TypeKind.unknown) {
                 typ = value.?.typ.collapseTypeParam(self.type_manager);
@@ -1128,7 +1161,6 @@ const Typer = struct {
             else => unreachable,
         };
         
-        const name_symbol = self.symbol_manager.createSymbol(var_decl.name, scope.mode != .local);
         scope.set(name, name_symbol, typ, comptime_known, mutability);
         
         const kind: tast.VarDeclKind = switch (var_decl.decl.kind) {
@@ -1258,6 +1290,10 @@ const Typer = struct {
         if (is_variadic) {
             // TODO: Variadic function with default value?
             if (call.args.len < params.len - skip_param - default_param_count - 1) {
+                if (callee.typ.value.func.name) |fn_name| {
+                    self.reporter.addDiagnostic(.note, fn_name.token.loc, "Function is declared here", .{});
+                }
+                
                 self.reporter.reportErrorAtSpan(
                     span,
                     "Expected {} or more arguments but got {}",
@@ -1268,6 +1304,10 @@ const Typer = struct {
         else {
             if (default_param_count == 0) {
                 if (call.args.len != params.len - skip_param) {
+                    if (callee.typ.value.func.name) |fn_name| {
+                        self.reporter.addDiagnostic(.note, fn_name.token.loc, "Function is declared here", .{});
+                    }
+                    
                     self.reporter.reportErrorAtSpan(
                         span,
                         "Expected {} arguments but got {}",
@@ -1277,6 +1317,10 @@ const Typer = struct {
             }
             else {
                 if (call.args.len < params.len - skip_param - default_param_count) {
+                    if (callee.typ.value.func.name) |fn_name| {
+                        self.reporter.addDiagnostic(.note, fn_name.token.loc, "Function is declared here", .{});
+                    }
+                    
                     self.reporter.reportErrorAtSpan(
                         span,
                         "Expected {} or more arguments but got {}",
@@ -1284,6 +1328,10 @@ const Typer = struct {
                     );
                 }
                 else if (call.args.len > params.len - skip_param) {
+                    if (callee.typ.value.func.name) |fn_name| {
+                        self.reporter.addDiagnostic(.note, fn_name.token.loc, "Function is declared here", .{});
+                    }
+                    
                     self.reporter.reportErrorAtSpan(
                         span,
                         "Expected {} or more arguments and no more than {} arguments but got {}",
@@ -1315,6 +1363,10 @@ const Typer = struct {
                 typed_args.appendAssumeCapacity(expr);
                 
                 if (!expr.typ.canBeAssignedToOrResolveGeneric(params[index].typ, self.type_manager)) {
+                    if (callee.typ.value.func.name) |fn_name| {
+                        self.reporter.addDiagnostic(.note, fn_name.token.loc, "Function is declared here", .{});
+                    }
+                    
                     self.reporter.reportErrorAtSpan(
                         arg.span,
                         "Expected type `{s}` but got `{s}`",
@@ -1326,7 +1378,8 @@ const Typer = struct {
                 }
             }
             
-            var symbol: *Symbol = undefined;
+            // Double pointer soalnya harus ngerubah symbol callee-nya
+            var symbol: **Symbol = undefined;
             
             switch (callee.value) {
                 .identifier => { symbol = &callee.value.identifier.name; },
@@ -1363,7 +1416,7 @@ const Typer = struct {
                     
                     if (fn_decl_data.ast.body) |_| {
                         var monomorphized_tast = fn_decl_data.tast;
-                        monomorphized_tast.name = self.symbol_manager.cloneSymbol(&monomorphized_tast.name);
+                        monomorphized_tast.name = self.symbol_manager.cloneSymbol(monomorphized_tast.name);
                         monomorphized_tast.params = self.arena.dupe(tast.FnParam, monomorphized_tast.params) catch unreachable;
                         
                         for (monomorphized_tast.params) |*param| {
@@ -1376,6 +1429,7 @@ const Typer = struct {
                         
                         self.fn_decls.append(self.temp_allocator, monomorphized_tast) catch unreachable;
                         self.generic_fn_monomorphized.put(h, monomorphized_tast.name) catch unreachable;
+                        
                         symbol.* = monomorphized_tast.name;
                     }
                     else {
@@ -1390,6 +1444,8 @@ const Typer = struct {
                     std.debug.panic("No generic function with type_id : {}", .{callee.typ.type_id});
                 }
             }
+            
+            self.symbol_manager.addUsage(symbol.*, self.getParentSymbol());
         }
         else {
             for (call.args, 0..) |arg, i| {
@@ -1400,6 +1456,10 @@ const Typer = struct {
                 typed_args.appendAssumeCapacity(expr);
                 
                 if (!expr.typ.canBeAssignedTo(params[index].typ)) {
+                    if (callee.typ.value.func.name) |fn_name| {
+                        self.reporter.addDiagnostic(.note, fn_name.token.loc, "Function is declared here", .{});
+                    }
+                    
                     self.reporter.reportErrorAtSpan(
                         arg.span,
                         "Expected type `{s}` but got `{s}`",
@@ -1717,15 +1777,15 @@ const Typer = struct {
     }
     
     fn typeFor(self: *Typer, scope: *Scope, forr: *const ast.For) tast.Stmt {
-        var item_var: ?Symbol = null;
-        var index_var: ?Symbol = null;
+        var item_var: ?*Symbol = null;
+        var index_var: ?*Symbol = null;
         
         if (forr.item_var) |v| {
-            item_var = self.symbol_manager.createSymbol(v, false);
+            item_var = self.symbol_manager.createSymbol(v, false, self.getParentSymbol());
         }
         
         if (forr.index_var) |v| {
-            index_var = self.symbol_manager.createSymbol(v, false);
+            index_var = self.symbol_manager.createSymbol(v, false, self.getParentSymbol());
         }
         
         const iter = self.typeExpr(scope, forr.iter, types.UNKNOWN);
@@ -1986,6 +2046,8 @@ const Typer = struct {
         const typed_symbol = scope.get(name);
         
         if (typed_symbol) |sym| {
+            self.symbol_manager.addUsage(sym.symbol, self.getParentSymbol());
+            
             return .{
                 .value = .{ .identifier = .{ .name = sym.symbol } },
                 .typ = sym.typ,
@@ -2688,6 +2750,8 @@ const Typer = struct {
         const member_text = self.getTokenText(mem.member);
         
         if (scope.getImplField(callee.typ.type_id, member_text)) |field| {
+            self.symbol_manager.addUsage(field.name, self.getParentSymbol());
+            
             return .{
                 .typ = field.typ,
                 .mutability = .immutable,
@@ -2698,6 +2762,8 @@ const Typer = struct {
             };
         }
         else if (scope.getImplMethod(callee.typ.type_id, member_text)) |method| {
+            self.symbol_manager.addUsage(method.name, self.getParentSymbol());
+            
             var actual_callee = callee;
             
             if (method.typ.value.func.params[0].typ.value == .reference and callee.typ.value != .reference) {
@@ -2820,6 +2886,8 @@ const Typer = struct {
                 
                 if (struct_typ.method_map.get(member_text_)) |index| {
                     const method = struct_typ.methods[index];
+                    typer.symbol_manager.addUsage(method.name, typer.getParentSymbol());
+                    
                     var actual_callee = allocateCallee(typer, callee_, should_allocate);
                         
                     if (method.typ.value.func.params[0].typ.value == .reference) {
@@ -2905,6 +2973,8 @@ const Typer = struct {
         const symbol = scope.getChildScopeSymbol(struct_typ.name.text, member_text);
         
         if (symbol) |sym| {
+            self.symbol_manager.addUsage(sym.symbol, self.getParentSymbol());
+            
             return .{
                 .typ = sym.typ,
                 .mutability = sym.mutability,
@@ -2957,6 +3027,8 @@ const Typer = struct {
         const symbol = scope.getChildScopeSymbol(enum_typ.value.@"enum".name.text, member_text);
         
         if (symbol) |sym| {
+            self.symbol_manager.addUsage(sym.symbol, self.getParentSymbol());
+            
             return .{
                 .typ = sym.typ,
                 .comptime_known = sym.comptime_known,
@@ -2984,6 +3056,8 @@ const Typer = struct {
         
         for (enum_typ.methods, 0..) |method, i| {
             if (std.mem.eql(u8, method.name.text, member_text)) {
+                self.symbol_manager.addUsage(method.name, self.getParentSymbol());
+            
                 var actual_callee = callee;
                 
                 if (method.typ.value.func.params[0].typ.value == .reference) {
@@ -3239,7 +3313,7 @@ const Typer = struct {
         
         for (field_states, 0..) |field_state, i| {
             if (field_state == .unresolved) {
-                
+                self.reporter.addDiagnostic(.note, struct_typ.fields[i].name.token.loc, "Field is declared here", .{});
                 
                 self.reporter.reportErrorAtSpan(
                     span,
@@ -3653,7 +3727,7 @@ const Typer = struct {
 
 pub fn typecheck(
     arena: std.mem.Allocator,
-    reporter: *const Reporter,
+    reporter: *Reporter,
     file_manager: *const FileManager,
     symbol_manager: *SymbolManager,
     type_manager: *TypeManager,

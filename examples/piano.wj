@@ -6,7 +6,7 @@ const SCREEN_HEIGHT = 720
 
 fn main() {
     setTargetFPS(60)
-    initWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "My Piano")
+    initWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "My Piano"c)
     
     while !windowShouldClose() {        
         beginDrawing()

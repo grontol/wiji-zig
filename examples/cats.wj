@@ -43,9 +43,9 @@ struct Cat {
 
 fn main() {
     setTargetFPS(60)
-    initWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Battle")
+    initWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Battle"c)
     
-    textCat = loadTexture("examples/assets/cat.jpeg")
+    textCat = loadTexture("examples/assets/cat.jpeg"c)
     val cats: [dyn]Cat = .[.{0, 0}]
     
     while !windowShouldClose() {

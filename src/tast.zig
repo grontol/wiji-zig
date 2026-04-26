@@ -34,7 +34,7 @@ pub const VarDeclKind = enum {
 
 pub const VarDecl = struct {
     kind: VarDeclKind,
-    name: Symbol,
+    name: *Symbol,
     value: ?*Expr,
     typ: *const Type,
 };
@@ -56,7 +56,7 @@ pub const Assignment = struct {
 };
 
 pub const FnParam = struct {
-    name: Symbol,
+    name: *Symbol,
     default_value: ?*Expr,
     typ: *const Type,
     is_variadic: bool,
@@ -68,9 +68,9 @@ pub const FnDecl = struct {
     extern_name: ?[]const u8,
     extern_abi: ?[]const u8,
     is_public: bool,
-    name: Symbol,
+    name: *Symbol,
     params: []FnParam,
-    type_params: []const Symbol,
+    type_params: []const *Symbol,
     return_typ: *const Type,
     body: ?Block,
     
@@ -115,7 +115,7 @@ pub const While = struct {
 };
 
 pub const ForRange = struct {
-    item_var: ?Symbol,
+    item_var: ?*Symbol,
     start: *Expr,
     end: *Expr,
     body: *Stmt,
@@ -127,9 +127,9 @@ pub const ForEach = struct {
         array,
         string,
     },
-    item_var: ?Symbol,
+    item_var: ?*Symbol,
     item_typ: ?*const Type,
-    index_var: ?Symbol,
+    index_var: ?*Symbol,
     is_reference: bool,
     iter: *Expr,
     body: *Stmt,
@@ -145,7 +145,7 @@ pub const Break = struct {
 };
 
 pub const Identifier = struct {
-    name: Symbol,
+    name: *Symbol,
 };
 
 pub const UnaryOp = enum {

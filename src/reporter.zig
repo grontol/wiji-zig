@@ -4,15 +4,42 @@ const TokenSpan = @import("token.zig").TokenSpan;
 const FileManager = @import("file_manager.zig");
 const CompilerOptions = @import("options.zig");
 
-const ANSI_RED =    "\x1b[0;31m";
-const ANSI_GREEN =  "\x1b[0;32m";
+const ANSI_RED    = "\x1b[0;31m";
+const ANSI_GREEN  = "\x1b[0;32m";
 const ANSI_YELLOW = "\x1b[0;33m";
-const ANSI_GRAY =   "\x1b[0;2m";
-const ANSI_WHITE =  "\x1b[0;97m";
-const ANSI_RESET =  "\x1b[0m";
+const ANSI_BLUE   = "\x1b[0;34m";
+const ANSI_GRAY   = "\x1b[0;2m";
+const ANSI_WHITE  = "\x1b[0;97m";
+const ANSI_RESET  = "\x1b[0m";
+
+const DiagnosticKind = enum {
+    err,
+    warn,
+    note,
+    info,
+    
+    fn text(self: @This()) []const u8 {
+        return switch (self) {
+            .err => "error",
+            .warn => "warning",
+            .note => "note",
+            .info => "info",
+        };
+    }
+    
+    fn color(self: @This()) []const u8 {
+        return switch (self) {
+            .err => ANSI_RED,
+            .warn => ANSI_YELLOW,
+            .note => ANSI_BLUE,
+            .info => ANSI_WHITE,
+        };
+    }
+};
 
 const Diagnostic = struct {
-    
+    loc: TokenSpan,
+    msg: []const u8,
 };
 
 allocator: std.mem.Allocator,
@@ -30,7 +57,19 @@ pub fn init(allocator: std.mem.Allocator, file_manager: *FileManager, compiler_o
     };
 }
 
-pub fn reportErrorAtToken(self: Self, token: Token, comptime msg: []const u8, args: anytype) noreturn {
+pub fn addDiagnostic(self: *Self, kind: DiagnosticKind, loc: TokenSpan, comptime msg: []const u8, args: anytype) void {
+    var text = std.ArrayList(u8).empty;
+    text.print(self.allocator, "{s}{s}: ", .{kind.color(), kind.text()}) catch unreachable;
+    text.print(self.allocator, msg, args) catch unreachable;
+    text.print(self.allocator, ANSI_RESET, .{}) catch unreachable;
+    
+    self.diagnostics.append(self.allocator, .{
+        .loc = loc,
+        .msg = text.items,
+    }) catch unreachable;
+}
+
+pub fn reportErrorAtToken(self: *const Self, token: Token, comptime msg: []const u8, args: anytype) noreturn {
     self.printFileLoc(
         token.loc.file_id,
         token.loc.line,
@@ -42,7 +81,7 @@ pub fn reportErrorAtToken(self: Self, token: Token, comptime msg: []const u8, ar
     );
 }
 
-pub fn reportErrorAfterToken(self: Self, token: Token, comptime msg: []const u8, args: anytype) noreturn {
+pub fn reportErrorAfterToken(self: *const Self, token: Token, comptime msg: []const u8, args: anytype) noreturn {
     self.printFileLoc(
         token.loc.file_id,
         token.loc.line,
@@ -54,43 +93,53 @@ pub fn reportErrorAfterToken(self: Self, token: Token, comptime msg: []const u8,
     );
 }
 
-pub fn reportErrorAtPos(self: Self, file_id: usize, line: usize, col: usize, index: usize, len: usize, comptime msg: []const u8, args: anytype) noreturn {
+pub fn reportErrorAtPos(self: *const Self, file_id: usize, line: usize, col: usize, index: usize, len: usize, comptime msg: []const u8, args: anytype) noreturn {
     self.printFileLoc(file_id, line, col, index, index + len, msg, args);
 }
 
-pub fn reportErrorAtSpan(self: Self, span: TokenSpan, comptime msg: []const u8, args: anytype) noreturn {
+pub fn reportErrorAtSpan(self: *const Self, span: TokenSpan, comptime msg: []const u8, args: anytype) noreturn {
     self.printFileLoc(span.file_id, span.line, span.col, span.start, span.end, msg, args);
 }
 
-fn printFileLoc(self: Self, file_id: usize, line: usize, col: usize, start: usize, end: usize, comptime msg: []const u8, args: anytype) noreturn {
+fn printDiagnostics(self: *const Self, writer: *std.Io.Writer) void {    
+    for (self.diagnostics.items) |d| {
+        const filename = self.file_manager.getFilename(d.loc.file_id);
+        writer.print("{s}:{d}:{d}:\n{s}\n", .{ filename, d.loc.line, d.loc.col, d.msg }) catch {};
+    }
+    
+    writer.flush() catch {};
+}
+
+fn printFileLoc(self: *const Self, file_id: usize, line: usize, col: usize, start: usize, end: usize, comptime msg: []const u8, args: anytype) noreturn {
     var buffer: [1024]u8 = undefined;
     var stdout_writer = std.fs.File.stdout().writer(&buffer);
     const writer = &stdout_writer.interface;
+    const filename = self.file_manager.getFilename(file_id);
     
     switch (self.compiler_options.err_mode) {
         .dev => {
-            const filename = self.file_manager.getFilename(file_id);
             writer.print("{s}:{d}:{d}:\n" ++ ANSI_RED, .{ filename, line, col }) catch {};
-            writer.print("Error: ", .{}) catch {};
+            writer.print("error: ", .{}) catch {};
             writer.print(msg, args) catch {};
             writer.print(ANSI_RESET ++ "\n", .{}) catch {};
             writer.flush() catch {};
             
             const src = self.file_manager.getContent(file_id);
             printSource(writer, src, line, start, end);
+            self.printDiagnostics(writer);
             
             std.debug.panic("", .{});
         },
         .normal => {
-            const filename = self.file_manager.getFilename(file_id);
             writer.print("{s}:{d}:{d}:\n" ++ ANSI_RED, .{ filename, line, col }) catch {};
-            writer.print("Error: ", .{}) catch {};
+            writer.print("error: ", .{}) catch {};
             writer.print(msg, args) catch {};
             writer.print(ANSI_RESET ++ "\n", .{}) catch {};
             writer.flush() catch {};
             
             const src = self.file_manager.getContent(file_id);
             printSource(writer, src, line, start, end);
+            self.printDiagnostics(writer);
             
             std.process.exit(0);
         },
@@ -100,7 +149,7 @@ fn printFileLoc(self: Self, file_id: usize, line: usize, col: usize, start: usiz
             writer.flush() catch {};
             std.process.exit(0);
         },
-    }    
+    }
 }
 
 fn printSource(writer: *std.io.Writer, src: []const u8, line: usize, start: usize, end: usize) void {

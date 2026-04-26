@@ -92,7 +92,7 @@ pub const Scope = struct {
         return null;
     }    
     
-    pub fn set(self: *Scope, key: []const u8, symbol: Symbol, typ: *const Type, comptime_known: bool, mutability: Mutability) void {
+    pub fn set(self: *Scope, key: []const u8, symbol: *Symbol, typ: *const Type, comptime_known: bool, mutability: Mutability) void {
         const typed_symbol = TypedSymbol{
             .symbol = symbol,
             .typ = typ,

@@ -1,17 +1,11 @@
-enum Time {
-    day,
-    night,
-}
-
 fn main() {
-    const x = Foo.{}
-    var t: Time
-}
-
-fn foo() {
+    var xs: [dyn]i32 = .[]
+    daAppend(&xs, 1)
     
+    var ys: [dyn]string = .[]
+    daAppend(&ys, "")
 }
 
-struct Foo {
-    x: i32
+fn daAppend<T>(arr: &[dyn]T, value: T) {
+    
 }

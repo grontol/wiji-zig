@@ -30,9 +30,9 @@ fn main() {
 
 fn printBlock() {
     for b in blocks {
-        if b == 1 printf("*")
-        else printf(" ")
+        if b == 1 print("*")
+        else print(" ")
     }
     
-    printf("\n")
+    print("\n")
 }

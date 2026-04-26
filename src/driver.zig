@@ -75,7 +75,8 @@ pub const Driver = struct {
             std.process.exit(0);
         }
         
-        const c_source = cgen.cGen(self.allocator, &tast_module);
+        self.symbol_manager.removeUnusedSymbols();
+        const c_source = cgen.cGen(self.allocator, self.symbol_manager, &tast_module);
         
         if (self.options.emit_c) {
             std.debug.print("{s}\n", .{c_source});

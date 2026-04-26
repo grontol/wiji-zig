@@ -22,7 +22,7 @@ fn main() {
     var frame_time = 0.0
     
     setTargetFPS(60)
-    initWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Hello Guys")
+    initWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Hello Guys"c)
     
     while !windowShouldClose() {
         beginDrawing()

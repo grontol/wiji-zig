@@ -5,6 +5,7 @@ const types = @import("type.zig");
 const Type = types.Type;
 const TypeId = types.TypeId;
 const Symbol = @import("symbol.zig").Symbol;
+const SymbolManager = @import("symbol.zig").SymbolManager;
 
 const dyn_array_append_macro =
 \\#define DYN_ARRAY_APPEND(typ, arr, value) do {                                \
@@ -37,6 +38,7 @@ const dyn_array_append_macro =
 
 const Cgen = struct {
     allocator: std.mem.Allocator,
+    symbol_manager: *SymbolManager,
     header_src: std.ArrayList(u8) = .empty,
     typedef_src: std.ArrayList(u8) = .empty,
     builtin_src: std.ArrayList(u8) = .empty,
@@ -52,9 +54,10 @@ const Cgen = struct {
     
     dyn_array_append_generated: bool = false,
     
-    fn init(allocator: std.mem.Allocator) Cgen {
+    fn init(allocator: std.mem.Allocator, symbol_manager: *SymbolManager) Cgen {
         return Cgen{
             .allocator = allocator,
+            .symbol_manager = symbol_manager,
             .type_map = std.AutoHashMap(TypeId, []const u8).init(allocator),
             .generated_modules = std.AutoHashMap(usize, bool).init(allocator),
         };
@@ -109,7 +112,7 @@ const Cgen = struct {
         self.dyn_array_append_generated = true;
     }
     
-    fn writeSymbol(self: *Cgen, symbol: Symbol) void {
+    fn writeSymbol(self: *Cgen, symbol: *const Symbol) void {
         for (symbol.namespaces) |namespace| {
             self.writeArgs("{s}___", .{namespace});
         }
@@ -140,6 +143,8 @@ const Cgen = struct {
         self.write("#include <stdbool.h>\n");
         self.write("#include <stddef.h>\n");
         self.write("int printf(const char* fmt, ...);\n");
+        self.write("void* malloc(size_t size);\n");
+        self.write("void* realloc(void* ptr, size_t size);\n");
         
         self.setToTypedef();
         self.write("typedef uint8_t  u8;\n");
@@ -176,13 +181,13 @@ const Cgen = struct {
         
         self.setToVar();
         for (module.var_decls) |var_decl| {
-            self.genVarDecl(&var_decl, true);
-            
-            if (var_decl.kind != .Const or !var_decl.typ.isConstable()) {
-                self.write(";");
+            if (self.genVarDecl(&var_decl, true)) {
+                if (var_decl.kind != .Const or !var_decl.typ.isConstable()) {
+                    self.write(";");
+                }
+                
+                self.write("\n");
             }
-            
-            self.write("\n");
         }
         
         for (module.fn_decls) |fn_decl| {
@@ -191,6 +196,12 @@ const Cgen = struct {
     }
     
     fn genFnDecl(self: *Cgen, fn_decl: *const tast.FnDecl) void {
+        const is_main = std.mem.eql(u8, fn_decl.name.text, "main");
+        
+        if (!is_main and self.symbol_manager.getUsage(fn_decl.name) == 0) {
+            return;
+        }
+        
         var should_create_decl = true;
         var should_create_impl = true;
         
@@ -202,7 +213,7 @@ const Cgen = struct {
             should_create_impl = false;
         }
         else {
-            should_create_decl = !std.mem.eql(u8, fn_decl.name.text, "main");
+            should_create_decl = !is_main;
         }
         
         if (should_create_decl) {
@@ -279,7 +290,12 @@ const Cgen = struct {
         var has_newline = true;
         
         switch (stmt.value) {
-            .var_decl   => |var_decl|  { self.genVarDecl(&var_decl, false); },
+            .var_decl   => |var_decl|  {
+                if (!self.genVarDecl(&var_decl, false)) {
+                    has_semicolon = false;
+                    has_newline = false;
+                }
+            },
             .assignment => |ass|       { self.genAssignment(&ass); },
             .fn_call    => |fn_call|   { self.genFnCall(&fn_call); },
             .returns    => |ret|       { self.genReturn(&ret); },
@@ -340,7 +356,11 @@ const Cgen = struct {
         self.write("continue");
     }
     
-    fn genVarDecl(self: *Cgen, decl: *const tast.VarDecl, is_top_level: bool) void {
+    fn genVarDecl(self: *Cgen, decl: *const tast.VarDecl, is_top_level: bool) bool {
+        if (self.symbol_manager.getUsage(decl.name) == 0) {
+            return false;
+        }
+        
         if (is_top_level and decl.kind == .Const and decl.typ.isConstable()) {
             std.debug.assert(decl.value != null);
             
@@ -359,6 +379,8 @@ const Cgen = struct {
                 self.genExpr(value);
             }
         }
+        
+        return true;
     }
     
     fn genAssignment(self: *Cgen, ass: *const tast.Assignment) void {
@@ -1171,8 +1193,8 @@ const Cgen = struct {
     }
 };
 
-pub fn cGen(allocator: std.mem.Allocator, module: *const tast.Module) []const u8 {
-    var cg = Cgen.init(allocator);
+pub fn cGen(allocator: std.mem.Allocator, symbol_manager: *SymbolManager, module: *const tast.Module) []const u8 {
+    var cg = Cgen.init(allocator, symbol_manager);
     return cg.gen(module);
 }
 

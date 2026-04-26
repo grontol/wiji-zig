@@ -6,7 +6,7 @@ fn main() {
 }
 
 fn one() {
-    const x = readEntireFile("examples/aoc/1.txt")
+    const x = readEntireFile("examples/aoc/1.txt"c)
     const lines = x.split('\n')
     
     var dial = 50
@@ -16,7 +16,7 @@ fn one() {
         var num = line.substring(1).toInt()
         num %= 100
         
-        if line.data[0] == 'L' {
+        if line[0] == 'L' {
             dial -= num
         }
         else {
@@ -30,11 +30,11 @@ fn one() {
         }
     }
     
-    printf("count = %d\n", count)
+    print("count = {}\n", count)
 }
 
 fn two() {
-    const x = readEntireFile("examples/aoc/1.txt")
+    const x = readEntireFile("examples/aoc/1.txt"c)
     const lines = x.split('\n')
     
     var dial = 50
@@ -47,7 +47,7 @@ fn two() {
         
         count += rot
         
-        if line.data[0] == 'L' {
+        if line[0] == 'L' {
             if dial != 0 && dial - num < 0 {
                 count += 1
             }
@@ -69,5 +69,5 @@ fn two() {
         }
     }
     
-    printf("count = %d\n", count)
+    print("count = {}\n", count)
 }

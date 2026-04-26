@@ -100,7 +100,7 @@ pub const TypeFuncParam = struct {
 };
 
 pub const TypeFunc = struct {
-    name: ?Symbol,
+    name: ?*Symbol,
     params: []const TypeFuncParam,
     type_params: []const *Type,
     returns: *const Type,
@@ -117,7 +117,7 @@ pub const TypeArray = struct {
 };
 
 pub const TypeStructField = struct {
-    name: Symbol,
+    name: *Symbol,
     typ: *const Type,
     offset: usize,
     default_value: ?*anyopaque,
@@ -125,12 +125,12 @@ pub const TypeStructField = struct {
 };
 
 pub const TypeMethod = struct {
-    name: Symbol,
+    name: *Symbol,
     typ: *const Type,
 };
 
 pub const TypeStruct = struct {
-    name: Symbol,
+    name: *Symbol,
     field_map: std.StringHashMap(usize),
     method_map: std.StringHashMap(usize),
     generic_base: ?*const Type,
@@ -208,13 +208,13 @@ pub const TypeStruct = struct {
 };
 
 pub const TypeEnum = struct {
-    name: Symbol,
-    items: []const Symbol,
+    name: *Symbol,
+    items: []const *Symbol,
     methods: []const TypeMethod,
 };
 
 pub const TypeImplField = struct {
-    name: Symbol,
+    name: *Symbol,
     typ: *const Type,
 };
 
@@ -253,7 +253,7 @@ pub const Type = struct {
     value: union(TypeKind) {
         unknown,
         type_param: struct {
-            name: Symbol,
+            name: *Symbol,
             index: usize,
             resolved_typ: ?*const Type = null,
         },
@@ -969,7 +969,7 @@ pub const TypeManager = struct {
     
     pub fn createFn(
         self: *TypeManager,
-        name: ?Symbol,
+        name: ?*Symbol,
         params: []const TypeFuncParam,
         type_params: []const *Type,
         return_typ: *const Type,
@@ -1015,7 +1015,7 @@ pub const TypeManager = struct {
         }
     }
     
-    pub fn createStructForward(self: *TypeManager, name: Symbol) *Type {
+    pub fn createStructForward(self: *TypeManager, name: *Symbol) *Type {
         const typ = Type{
             .kind = .@"struct",
             .size = 0,
@@ -1041,7 +1041,7 @@ pub const TypeManager = struct {
         return new_typ_ptr;
     }
     
-    pub fn createEnum(self: *TypeManager, name: Symbol, items: []Symbol, methods: []const TypeMethod) *Type {
+    pub fn createEnum(self: *TypeManager, name: *Symbol, items: []*Symbol, methods: []const TypeMethod) *Type {
         const typ = Type{
             .kind = .@"enum",
             .size = 8,
@@ -1134,7 +1134,7 @@ pub const TypeManager = struct {
         }
     }
     
-    pub fn createTypeParam(self: *TypeManager, name: Symbol, index: usize) *Type {
+    pub fn createTypeParam(self: *TypeManager, name: *Symbol, index: usize) *Type {
         const typ = Type{
             .kind = .type_param,
             .size = 0,

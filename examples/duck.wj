@@ -8,12 +8,12 @@ extern fn powf(base: f32, exp: f32): f32
 
 fn main() {
     setTargetFPS(60)
-    initWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Clicker")
+    initWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Clicker"c)
     
     initAudioDevice()
     
-    const duck = loadTexture("examples/cat.jpg")
-    const sound = loadSound("examples/bebek.mp3")
+    const duck = loadTexture("examples/cat.jpg"c)
+    const sound = loadSound("examples/bebek.mp3"c)
     setSoundPitch(sound, 2)
     
     val ducks: []Duck = .[

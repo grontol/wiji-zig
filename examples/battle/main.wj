@@ -4,7 +4,7 @@ import "raylib"
 const SCREEN_WIDTH  = 1280
 const SCREEN_HEIGHT = 720
 
-const ASSETS_DIR = "examples/battle/assets/"
+const ASSETS_DIR = "examples/battle/assets/"c
 var textPlayer: Texture
 var textRed: Texture
 var textGreen: Texture
@@ -16,13 +16,13 @@ val enemies: [dyn]Enemy = .[]
 
 fn main() {
     setTargetFPS(60)
-    initWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Battle")
+    initWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Battle"c)
     
-    textPlayer = loadTexture(ASSETS_DIR ++ "player.png")
-    textRed = loadTexture(ASSETS_DIR ++ "red.png")
-    textGreen = loadTexture(ASSETS_DIR ++ "green.png")
-    textYellow = loadTexture(ASSETS_DIR ++ "yellow.png")
-    textBullet = loadTexture(ASSETS_DIR ++ "bullet.png")
+    textPlayer = loadTexture("examples/battle/assets/player.png"c)
+    textRed = loadTexture("examples/battle/assets/red.png"c)
+    textGreen = loadTexture("examples/battle/assets/green.png"c)
+    textYellow = loadTexture("examples/battle/assets/yellow.png"c)
+    textBullet = loadTexture("examples/battle/assets/bullet.png"c)
     
     val player = Player.new(SCREEN_WIDTH as f32 / 2, SCREEN_HEIGHT as f32 - 100)
     spawnEnemy()
